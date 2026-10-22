@@ -24,7 +24,7 @@ Design mockup: [`docs/mockup.html`](docs/mockup.html).
 It calls `https://api.anthropic.com/api/oauth/usage` — the endpoint Claude Code's `/usage` uses — with the OAuth token Claude Code stores in `~/.claude/.credentials.json`. The token is read at each refresh and sent only to `api.anthropic.com`; it is never stored. The latest plan-limit percentages and reset times (nothing else from the response) are saved in GNOME settings (`last-usage`) so the settings window can show them.
 
 - You need [Claude Code](https://claude.com/claude-code) installed and logged in with a Claude subscription.
-- Only Claude Code renews that token. If you haven't run it for a while, the bar shows a padlock until you open Claude Code again, or use **Sign in…** in the menu.
+- Only Claude Code renews that token. If you haven't run it for a while, the bar shows a padlock until you open Claude Code again, or use **Sign in…** in the menu. An experimental, off-by-default setting can renew it in the background through the `claude` CLI; the refresh token is single-use, so if an open Claude Code renews at the same moment it could get signed out.
 - The endpoint is undocumented and may change or stop working at any time.
 
 ## Install

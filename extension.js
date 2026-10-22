@@ -1,7 +1,7 @@
 // Claude Usage — shows Claude plan limits in the GNOME top bar.
 // Data: the same endpoint Claude Code's /usage uses, authenticated with the
 // OAuth token Claude Code keeps in ~/.claude/.credentials.json (read at runtime,
-// never copied anywhere). Claude Code renews that token while you use it.
+// never copied anywhere). See auth.js for the optional automatic renewal.
 
 import GObject from 'gi://GObject';
 import GLib from 'gi://GLib';
@@ -31,6 +31,7 @@ const PROBLEMS = {
         text: 'Retrying as soon as you\'re back online.'},
     unreachable: {icon: 'network-error-symbolic', title: 'Can\'t reach Anthropic',
         text: 'api.anthropic.com didn\'t answer. Retrying at the next refresh.'},
+    renewing: {icon: 'view-refresh-symbolic', title: 'Renewing sign-in'},
     auth: {icon: 'changes-prevent-symbolic', title: 'Sign in to Claude Code'},
     ratelimit: {icon: 'dialog-warning-symbolic', title: 'Slowed down by Anthropic'},
     server: {icon: 'dialog-warning-symbolic', title: 'Usage service problem'},
@@ -151,7 +152,10 @@ class UsageIndicator extends PanelMenu.Button {
     }
 
     async _fetch() {
-        const token = await this._auth.token();
+        const token = await this._auth.token(this._settings.get_boolean('auto-renew'), () => {
+            this._problem = new UsageError('renewing', 'Asking Claude Code to renew your login…');
+            this._render();
+        });
         const msg = Soup.Message.new('GET', USAGE_URL);
         msg.request_headers.append('Authorization', `Bearer ${token}`);
         msg.request_headers.append('anthropic-beta', 'oauth-2025-04-20');
@@ -210,6 +214,8 @@ class UsageIndicator extends PanelMenu.Button {
             if (err.kind === 'ratelimit') {
                 this._backoff = Math.min(this._backoff * 2, MAX_BACKOFF_SECONDS / next);
                 next = Math.min(err.retryAfter ?? next * this._backoff, MAX_BACKOFF_SECONDS);
+            } else if (err.kind === 'renewing') {
+                next = 60;
             }
             err.retryAt = Date.now() + next * 1000;
             this._problem = err;

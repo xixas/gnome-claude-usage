@@ -47,6 +47,10 @@
       <default>'remaining'</default>
       <summary>Countdown as time left or as clock time</summary>
     </key>
+    <key name="auto-renew" type="b">
+      <default>false</default>
+      <summary>Renew an expired Claude Code login through the claude CLI (single-use refresh token; can race a running Claude Code)</summary>
+    </key>
     <key name="refresh-minutes" type="i">
       <range min="1" max="60"/>
       <default>5</default>

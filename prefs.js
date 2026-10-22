@@ -107,6 +107,9 @@ export default class ClaudeUsagePrefs extends ExtensionPreferences {
         const updates = new Adw.PreferencesGroup({title: 'Updates'});
         page.add(updates);
         updates.add(spinRow(settings, 'refresh-minutes', 'Refresh every (minutes)', '', 1, 60));
+        updates.add(switchRow(settings, 'auto-renew', 'Renew sign-in automatically',
+            'Experimental. When the login has been expired 5 min, ask Claude Code to renew it in the background. ' +
+            'If an open Claude Code renews at the same moment, it could get signed out.'));
     }
 
     // A copy of the top-bar widget, redrawn on every settings change
