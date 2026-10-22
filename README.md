@@ -12,6 +12,8 @@ A small GNOME Shell extension that shows your Claude plan limits (session, week,
 - **Countdown** (amber/red by default): ⏱ time to reset, or ⌛ time until you run out when red. Time left or clock time.
 - **Menu:** a one-line verdict ("On track — you should reach the session reset with room to spare"), every limit with a bar, reset time and pace.
 - **Settings:** live preview, which limits sit in the bar, used/left, colour by pace/usage, thresholds, countdown, refresh interval.
+- **Problems shown clearly:** no internet, can't reach Anthropic, sign-in needed (with a **Sign in…** action), service errors. Each gets its own theme icon, and your last numbers stay visible in grey. Retries as soon as you're back online; backs off when Anthropic says "too many requests" (HTTP 429).
+- **Fresh when you look:** opening the menu refreshes if the numbers are over a minute old.
 
 Pace = `used% ÷ (time elapsed ÷ window)`, window 5 h for the session and 7 d for weekly limits. It's an estimate; the claude.ai "On track" line may use a different method.
 
@@ -22,7 +24,7 @@ Design mockup: [`docs/mockup.html`](docs/mockup.html).
 It calls `https://api.anthropic.com/api/oauth/usage` — the endpoint Claude Code's `/usage` uses — with the OAuth token Claude Code stores in `~/.claude/.credentials.json`. The token is read at each refresh and sent only to `api.anthropic.com`; it is never stored. The latest plan-limit percentages and reset times (nothing else from the response) are saved in GNOME settings (`last-usage`) so the settings window can show them.
 
 - You need [Claude Code](https://claude.com/claude-code) installed and logged in with a Claude subscription.
-- Only Claude Code renews that token. If you haven't run it for a while the bar shows a grey warning icon until you open Claude Code again.
+- Only Claude Code renews that token. If you haven't run it for a while, the bar shows a padlock until you open Claude Code again, or use **Sign in…** in the menu.
 - The endpoint is undocumented and may change or stop working at any time.
 
 ## Install
@@ -40,6 +42,10 @@ Log out and back in (Wayland), then:
 ```sh
 gnome-extensions enable claude-usage@vikas
 ```
+
+## Other desktops
+
+GNOME only. To port it to KDE Plasma, COSMIC or a tray app, start with [`PORTING.md`](PORTING.md): it has the endpoint, the response shape, and every rule as plain numbers.
 
 ## License
 

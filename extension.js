@@ -1,7 +1,7 @@
 // Claude Usage — shows Claude plan limits in the GNOME top bar.
 // Data: the same endpoint Claude Code's /usage uses, authenticated with the
 // OAuth token Claude Code keeps in ~/.claude/.credentials.json (read at runtime,
-// never copied anywhere). Claude Code refreshes that token while you use it.
+// never copied anywhere). Claude Code renews that token while you use it.
 
 import GObject from 'gi://GObject';
 import GLib from 'gi://GLib';
@@ -16,12 +16,25 @@ import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
 import {LEVELS, nameFor, phraseFor, durText, clockText, summarise, countdownText, planLimitKeys} from './limits.js';
+import {Auth, UsageError} from './auth.js';
 
 Gio._promisify(Soup.Session.prototype, 'send_and_read_async');
 
 const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
-const CREDS_PATH = GLib.build_filenamev([GLib.get_home_dir(), '.claude', '.credentials.json']);
 const OFF = 'claude-usage-off';
+const MAX_BACKOFF_SECONDS = 3600;
+const MENU_REFRESH_AFTER_MS = 60e3;
+
+// Shown in place of the spark (grey, last numbers kept) when a fetch fails
+const PROBLEMS = {
+    offline: {icon: 'network-offline-symbolic', title: 'No internet connection',
+        text: 'Retrying as soon as you\'re back online.'},
+    unreachable: {icon: 'network-error-symbolic', title: 'Can\'t reach Anthropic',
+        text: 'api.anthropic.com didn\'t answer. Retrying at the next refresh.'},
+    auth: {icon: 'changes-prevent-symbolic', title: 'Sign in to Claude Code'},
+    ratelimit: {icon: 'dialog-warning-symbolic', title: 'Slowed down by Anthropic'},
+    server: {icon: 'dialog-warning-symbolic', title: 'Usage service problem'},
+};
 
 function bar(pct) {
     const filled = Math.round(Math.min(100, Math.max(0, pct)) / 10);
@@ -33,8 +46,12 @@ class UsageIndicator extends PanelMenu.Button {
     _init(ext) {
         super._init(0.5, 'Claude Usage');
         this._settings = ext.getSettings();
+        this._auth = new Auth();
         this._data = null;
+        this._problem = null;
         this._cd = null;
+        this._backoff = 1;
+        this._lastTry = 0;
 
         const icons = ext.dir.get_child('icons');
         this._claudeIcon = Gio.FileIcon.new(icons.get_child('claude-symbolic.svg'));
@@ -42,7 +59,6 @@ class UsageIndicator extends PanelMenu.Button {
             reset: new Gio.ThemedIcon({name: 'alarm-symbolic'}),
             out: Gio.FileIcon.new(icons.get_child('hourglass-symbolic.svg')),
         };
-        this._warnIcon = new Gio.ThemedIcon({name: 'dialog-warning-symbolic'});
 
         const box = new St.BoxLayout({style_class: 'panel-status-menu-box'});
         this._icon = new St.Icon({gicon: this._claudeIcon, style_class: 'system-status-icon'});
@@ -67,12 +83,17 @@ class UsageIndicator extends PanelMenu.Button {
         this._session = new Soup.Session({timeout: 20});
         this._cancellable = new Gio.Cancellable();
 
+        // Verdict ("On track …") or, when something is wrong, the problem
         this._verdict = new PopupMenu.PopupBaseMenuItem({reactive: false, visible: false});
         const vbox = new St.BoxLayout({orientation: Clutter.Orientation.VERTICAL, x_expand: true});
-        this._verdictTitle = new St.Label({style_class: 'claude-usage-verdict'});
+        const titleRow = new St.BoxLayout({style_class: 'claude-usage-verdict-row'});
+        this._verdictIcon = new St.Icon({style_class: 'claude-usage-verdict-icon', visible: false});
+        this._verdictTitle = new St.Label({style_class: 'claude-usage-verdict', y_align: Clutter.ActorAlign.CENTER});
+        titleRow.add_child(this._verdictIcon);
+        titleRow.add_child(this._verdictTitle);
         this._verdictText = new St.Label({style_class: 'claude-usage-reset'});
         this._verdictText.clutter_text.line_wrap = true;
-        vbox.add_child(this._verdictTitle);
+        vbox.add_child(titleRow);
         vbox.add_child(this._verdictText);
         this._verdict.add_child(vbox);
         this.menu.addMenuItem(this._verdict);
@@ -82,59 +103,102 @@ class UsageIndicator extends PanelMenu.Button {
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
         this._status = new PopupMenu.PopupMenuItem('', {reactive: false});
         this.menu.addMenuItem(this._status);
+        this._signIn = this.menu.addAction('Sign in…', () => {
+            if (this._auth.signIn())
+                this._schedule(60);
+        });
         this.menu.addAction('Refresh now', () => this._refresh());
         this.menu.addAction('Settings…', () => ext.openPreferences());
 
+        this.menu.connect('open-state-changed', (_m, open) => {
+            if (open && this._problem?.kind !== 'ratelimit' && Date.now() - this._lastTry > MENU_REFRESH_AFTER_MS)
+                this._refresh();
+        });
+
         this._settingsId = this._settings.connect('changed', (_s, key) => {
             if (key === 'refresh-minutes')
-                this._startTimer();
-            else if (key !== 'last-usage' && this._data)
+                this._schedule(this._interval());
+            else if (key !== 'last-usage')
                 this._render();
         });
 
+        this._monitor = Gio.NetworkMonitor.get_default();
+        this._networkId = this._monitor.connect('network-changed', (_m, available) => {
+            if (available && ['offline', 'unreachable'].includes(this._problem?.kind))
+                this._refresh();
+        });
+
+        this._render();
         this._refresh();
-        this._startTimer();
         this._tick = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 60, () => {
             this._updateCountdown();
             return GLib.SOURCE_CONTINUE;
         });
     }
 
-    _startTimer() {
-        if (this._timer)
-            GLib.source_remove(this._timer);
-        this._timer = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT,
-            this._settings.get_int('refresh-minutes') * 60, () => {
-                this._refresh();
-                return GLib.SOURCE_CONTINUE;
-            });
+    _interval() {
+        return this._settings.get_int('refresh-minutes') * 60;
     }
 
-    _readToken() {
-        const [, bytes] = Gio.File.new_for_path(CREDS_PATH).load_contents(null);
-        const oauth = JSON.parse(new TextDecoder().decode(bytes)).claudeAiOauth;
-        if (!oauth?.accessToken)
-            throw new Error('Not logged in to Claude Code');
-        if (oauth.expiresAt && oauth.expiresAt < Date.now())
-            throw new Error('Token expired — open Claude Code to refresh it');
-        return oauth.accessToken;
+    _schedule(seconds) {
+        if (this._timer)
+            GLib.source_remove(this._timer);
+        this._timer = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, seconds, () => {
+            this._timer = 0;
+            this._refresh();
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    async _fetch() {
+        const token = await this._auth.token();
+        const msg = Soup.Message.new('GET', USAGE_URL);
+        msg.request_headers.append('Authorization', `Bearer ${token}`);
+        msg.request_headers.append('anthropic-beta', 'oauth-2025-04-20');
+        msg.request_headers.append('Accept', 'application/json');
+
+        let bytes;
+        try {
+            bytes = await this._session.send_and_read_async(msg, GLib.PRIORITY_DEFAULT, this._cancellable);
+        } catch (e) {
+            if (e.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED))
+                throw e;
+            throw new UsageError(this._monitor.network_available ? 'unreachable' : 'offline', e.message);
+        }
+
+        const status = msg.get_status();
+        const body = new TextDecoder().decode(bytes.get_data());
+        if (status === 401 || status === 403)
+            throw new UsageError('auth', `Claude rejected the login (HTTP ${status}).`);
+        if (status === 429) {
+            const retryAfter = parseInt(msg.response_headers.get_one('Retry-After') ?? '', 10);
+            throw new UsageError('ratelimit', 'Too many requests (HTTP 429).', retryAfter > 0 ? retryAfter : null);
+        }
+        if (status !== Soup.Status.OK)
+            throw new UsageError('server', `HTTP ${status} ${body.slice(0, 120)}`);
+
+        let data;
+        try {
+            data = JSON.parse(body);
+        } catch {
+            data = null;
+        }
+        if (!planLimitKeys(data).length)
+            throw new UsageError('server', 'Unexpected response — the unofficial usage endpoint may have changed.');
+        return data;
     }
 
     async _refresh() {
+        if (this._busy)
+            return;
+        this._busy = true;
+        this._lastTry = Date.now();
+        let next = this._interval();
         try {
-            const msg = Soup.Message.new('GET', USAGE_URL);
-            msg.request_headers.append('Authorization', `Bearer ${this._readToken()}`);
-            msg.request_headers.append('anthropic-beta', 'oauth-2025-04-20');
-            msg.request_headers.append('Accept', 'application/json');
-
-            const bytes = await this._session.send_and_read_async(
-                msg, GLib.PRIORITY_DEFAULT, this._cancellable);
-            const body = new TextDecoder().decode(bytes.get_data());
-            if (msg.get_status() !== Soup.Status.OK)
-                throw new Error(`HTTP ${msg.get_status()} ${body.slice(0, 120)}`);
-
-            this._data = JSON.parse(body);
+            this._data = await this._fetch();
             this._fetchedAt = GLib.DateTime.new_now_local();
+            this._backoff = 1;
+            this._problem = null;
             // Plan-limit percentages and reset times only — lets the settings window list limits and draw its preview
             const plan = Object.fromEntries(planLimitKeys(this._data).map(k => [k, this._data[k]]));
             this._settings.set_string('last-usage', JSON.stringify(plan));
@@ -142,56 +206,87 @@ class UsageIndicator extends PanelMenu.Button {
         } catch (e) {
             if (e.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED))
                 return;
-            this._data = null;
-            this._icon.gicon = this._warnIcon;
-            this._setLevel(null);
-            this._cd = null;
-            this._updateCountdown();
-            this._label.text = '--';
-            this._label.visible = true;
-            this._verdict.visible = false;
-            this._status.label.text = `⚠ ${e.message}`;
+            const err = e instanceof UsageError ? e : new UsageError('server', e.message);
+            if (err.kind === 'ratelimit') {
+                this._backoff = Math.min(this._backoff * 2, MAX_BACKOFF_SECONDS / next);
+                next = Math.min(err.retryAfter ?? next * this._backoff, MAX_BACKOFF_SECONDS);
+            }
+            err.retryAt = Date.now() + next * 1000;
+            this._problem = err;
+            this._render();
+        } finally {
+            this._busy = false;
+            if (!this._cancellable.is_cancelled())
+                this._schedule(next);
         }
     }
 
     _render() {
         const now = Date.now();
-        const {limits, top, text, cd} = summarise(this._data, this._settings, now);
+        // A 429 with numbers in hand isn't worth alarming about; everything else greys the bar
+        const problem = this._problem && !(this._problem.kind === 'ratelimit' && this._data) ? this._problem : null;
+        const summary = this._data ? summarise(this._data, this._settings, now) : null;
 
-        // Menu: one row per limit, always
         this._rows.removeAll();
-        for (const info of limits) {
+        for (const info of summary?.limits ?? []) {
             const item = new PopupMenu.PopupBaseMenuItem({reactive: false});
             const box = new St.BoxLayout({orientation: Clutter.Orientation.VERTICAL, x_expand: true});
             const line = new St.BoxLayout({style_class: 'claude-usage-row'});
             line.add_child(new St.Label({text: nameFor(info.key), style_class: 'claude-usage-name'}));
-            line.add_child(new St.Label({text: bar(info.pct), style_class: `claude-usage-bar ${LEVELS[info.level]}`, x_expand: true}));
+            line.add_child(new St.Label({
+                text: bar(info.pct),
+                style_class: `claude-usage-bar ${problem ? '' : LEVELS[info.level]}`,
+                x_expand: true,
+            }));
             line.add_child(new St.Label({text: `${info.pct}%`, style_class: 'claude-usage-pct'}));
             box.add_child(line);
             const parts = [];
             if (info.resetMs !== null)
                 parts.push(`resets ${clockText(info.resetMs)}`, `in ${durText(info.resetMs - now)}`);
-            if (info.pace !== null)
+            if (info.pace !== null && !problem)
                 parts.push(`pace ≈ ${Math.round(info.pace)}%`);
             box.add_child(new St.Label({text: parts.join(' · '), style_class: 'claude-usage-reset'}));
             item.add_child(box);
+            if (problem)
+                item.opacity = 128;
             this._rows.addMenuItem(item);
         }
 
-        this._icon.gicon = this._claudeIcon;
-        this._label.text = text;
-        this._label.visible = text !== '';
-        this._setLevel(top ? top.level : 0);
-        this._cd = cd;
+        this._icon.gicon = problem ? new Gio.ThemedIcon({name: PROBLEMS[problem.kind].icon}) : this._claudeIcon;
+        this._label.text = summary ? summary.text : (this._problem ? '--' : '…');
+        this._label.visible = !summary || summary.text !== '';
+        this._setLevel(problem || !summary ? null : summary.top?.level ?? 0);
+        this._cd = problem ? null : summary?.cd ?? null;
         this._updateCountdown();
-        this._renderVerdict(top);
-        this._status.label.text = `Updated ${this._fetchedAt.format('%-I:%M %p')}`;
+
+        if (problem)
+            this._showVerdict(PROBLEMS[problem.kind].title, PROBLEMS[problem.kind].text ?? problem.message,
+                null, PROBLEMS[problem.kind].icon);
+        else if (summary?.top)
+            this._renderVerdict(summary.top);
+        else
+            this._verdict.visible = false;
+
+        let status = this._fetchedAt ? `${problem ? 'Last updated' : 'Updated'} ${this._fetchedAt.format('%-I:%M %p')}` : 'No data yet';
+        if (this._problem?.kind === 'ratelimit')
+            status += ` · next try ${clockText(this._problem.retryAt)}`;
+        this._status.label.text = status;
+        this._signIn.visible = problem?.kind === 'auth';
+    }
+
+    _showVerdict(title, text, level, iconName = null) {
+        this._verdict.visible = true;
+        this._verdictTitle.text = title;
+        this._verdictText.text = text;
+        this._verdictIcon.visible = iconName !== null;
+        if (iconName)
+            this._verdictIcon.icon_name = iconName;
+        LEVELS.forEach(c => this._verdictTitle.remove_style_class_name(c));
+        if (level !== null)
+            this._verdictTitle.add_style_class_name(LEVELS[level]);
     }
 
     _renderVerdict(top) {
-        this._verdict.visible = !!top;
-        if (!top)
-            return;
         const what = phraseFor(top.key);
         const paced = this._settings.get_string('color-by') === 'pace' && top.pace !== null;
         let title, text;
@@ -212,10 +307,7 @@ class UsageIndicator extends PanelMenu.Button {
             title = ['Plenty left', 'Getting busy', 'Running low'][top.level];
             text = `${top.pct}% of the ${what} limit used.`;
         }
-        this._verdictTitle.text = title;
-        this._verdictText.text = text;
-        LEVELS.forEach(c => this._verdictTitle.remove_style_class_name(c));
-        this._verdictTitle.add_style_class_name(LEVELS[top.level]);
+        this._showVerdict(title, text, top.level);
     }
 
     _updateCountdown() {
@@ -227,7 +319,7 @@ class UsageIndicator extends PanelMenu.Button {
         this._cdLabel.text = countdownText(this._cd, this._settings);
     }
 
-    // level: 0–2, or null for "no data" (grey)
+    // level: 0–2, or null for "not live" (grey)
     _setLevel(level) {
         const colour = this._settings.get_boolean('color-enabled');
         for (const actor of [this._icon, this._label, this._cdIcon, this._cdLabel]) {
@@ -240,13 +332,15 @@ class UsageIndicator extends PanelMenu.Button {
     }
 
     destroy() {
+        this._cancellable.cancel();
         for (const id of [this._timer, this._tick]) {
             if (id)
                 GLib.source_remove(id);
         }
-        this._timer = this._tick = null;
+        this._timer = this._tick = 0;
         this._settings.disconnect(this._settingsId);
-        this._cancellable.cancel();
+        this._monitor.disconnect(this._networkId);
+        this._auth.destroy();
         this._session.abort();
         super.destroy();
     }

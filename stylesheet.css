@@ -4,6 +4,14 @@
   font-feature-settings: "tnum";
 }
 
+.claude-usage-verdict-row {
+  spacing: 8px;
+}
+
+.claude-usage-verdict-icon {
+  icon-size: 16px;
+}
+
 .claude-usage-verdict {
   font-weight: bold;
   font-size: 1.05em;
