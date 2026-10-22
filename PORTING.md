@@ -25,14 +25,20 @@ Example response (shape only; extra fields vary):
 {
   "five_hour":       { "utilization": 9.0,  "resets_at": "2026-10-22T07:00:00+00:00" },
   "seven_day":       { "utilization": 41.0, "resets_at": "2026-10-23T08:00:00+00:00" },
-  "seven_day_fable": { "utilization": 15.0, "resets_at": "2026-10-23T08:00:00+00:00" },
+  "seven_day_opus": null,
   "seven_day_oauth_apps": null,
-  "extra_usage": { "is_enabled": false, "utilization": null }
+  "extra_usage": { "is_enabled": false, "utilization": null },
+  "limits": [
+    { "kind": "session",       "percent": 9,  "resets_at": "…", "scope": null },
+    { "kind": "weekly_all",    "percent": 41, "resets_at": "…", "scope": null },
+    { "kind": "weekly_scoped", "percent": 15, "resets_at": "2026-10-23T08:00:00+00:00",
+      "scope": { "model": { "id": null, "display_name": "Fable" } } }
+  ]
 }
 ```
 
 - `utilization` is **percent used, 0–100**.
-- **Plan limits** = keys matching `^(five_hour|seven_day\w*)$`, excluding `seven_day_oauth_apps`, whose value has a numeric `utilization`. Ignore everything else.
+- **Plan limits** = top-level keys matching `^(five_hour|seven_day\w*)$`, excluding `seven_day_oauth_apps`, whose value has a numeric `utilization`; **plus** each `limits[]` entry with `kind: "weekly_scoped"`, a numeric `percent` and `scope.model.display_name` → key `seven_day_<display_name lowercased>` (this is the only place model limits such as Fable appear). Ignore everything else.
 - Names: `five_hour` → Session, `seven_day` → Week, `seven_day_<model>` → `<Model>`. Short labels: first letter (S, W, F…).
 
 ## Rules

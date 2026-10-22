@@ -49,8 +49,22 @@ function isPlanLimit(key, value) {
         typeof value?.utilization === 'number';
 }
 
+// The plan limits as {key: {utilization, resets_at}}. Model-scoped weekly limits (e.g. Fable) come
+// only in the nested `limits` list: {kind: 'weekly_scoped', percent, resets_at, scope: {model: {display_name}}}.
+export function planLimits(data) {
+    const out = Object.fromEntries(Object.entries(data ?? {}).filter(([k, v]) => isPlanLimit(k, v)));
+    for (const entry of Array.isArray(data?.limits) ? data.limits : []) {
+        const model = entry?.scope?.model?.display_name;
+        if (entry?.kind !== 'weekly_scoped' || typeof model !== 'string' || typeof entry.percent !== 'number')
+            continue;
+        const key = `seven_day_${model.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`;
+        out[key] ??= {utilization: entry.percent, resets_at: entry.resets_at ?? null};
+    }
+    return out;
+}
+
 export function planLimitKeys(data) {
-    return Object.entries(data ?? {}).filter(([k, v]) => isPlanLimit(k, v)).map(([k]) => k);
+    return Object.keys(planLimits(data));
 }
 
 export function durText(ms) {
@@ -102,8 +116,7 @@ function levelOf(info, settings) {
 // limits (all, for the menu), top (the limit that sets colour / countdown / verdict),
 // text (the bar label) and cd ({kind: 'reset' | 'out', ms} or null).
 export function summarise(data, settings, now = Date.now()) {
-    const limits = Object.entries(data)
-        .filter(([k, v]) => isPlanLimit(k, v))
+    const limits = Object.entries(planLimits(data))
         .map(([k, v]) => {
             const info = analyse(k, v, now);
             info.level = levelOf(info, settings);

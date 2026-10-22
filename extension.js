@@ -15,7 +15,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
-import {LEVELS, nameFor, phraseFor, durText, clockText, summarise, countdownText, planLimitKeys} from './limits.js';
+import {LEVELS, nameFor, phraseFor, durText, clockText, summarise, countdownText, planLimits, planLimitKeys} from './limits.js';
 import {Auth, UsageError} from './auth.js';
 
 Gio._promisify(Soup.Session.prototype, 'send_and_read_async');
@@ -205,8 +205,7 @@ class UsageIndicator extends PanelMenu.Button {
             this._backoff = 1;
             this._problem = null;
             // Plan-limit percentages and reset times only — lets the settings window list limits and draw its preview
-            const plan = Object.fromEntries(planLimitKeys(this._data).map(k => [k, this._data[k]]));
-            this._settings.set_string('last-usage', JSON.stringify(plan));
+            this._settings.set_string('last-usage', JSON.stringify(planLimits(this._data)));
             this._render();
         } catch (e) {
             if (e.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED))
