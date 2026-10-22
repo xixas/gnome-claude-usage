@@ -85,7 +85,8 @@ class UsageIndicator extends PanelMenu.Button {
         this._cancellable = new Gio.Cancellable();
 
         // Verdict ("On track …") or, when something is wrong, the problem
-        this._verdict = new PopupMenu.PopupBaseMenuItem({reactive: false, visible: false});
+        this._verdict = new PopupMenu.PopupBaseMenuItem({reactive: false});
+        this._verdict.visible = false;
         const vbox = new St.BoxLayout({orientation: Clutter.Orientation.VERTICAL, x_expand: true});
         const titleRow = new St.BoxLayout({style_class: 'claude-usage-verdict-row'});
         this._verdictIcon = new St.Icon({style_class: 'claude-usage-verdict-icon', visible: false});
