@@ -1,0 +1,61 @@
+.claude-usage-label {
+  font-weight: bold;
+  padding-left: 2px;
+  font-feature-settings: "tnum";
+}
+
+.claude-usage-verdict {
+  font-weight: bold;
+  font-size: 1.05em;
+}
+
+.claude-usage-cd-icon {
+  icon-size: 13px;
+  padding-left: 8px;
+  padding-right: 3px;
+}
+
+.claude-usage-cd {
+  font-weight: 600;
+  font-feature-settings: "tnum";
+}
+
+.claude-usage-ok {
+  color: #8ff0a4;
+}
+
+.claude-usage-warn {
+  color: #f6d32d;
+}
+
+.claude-usage-hot {
+  color: #ff7b63;
+}
+
+.claude-usage-off {
+  color: #9a9996;
+}
+
+.claude-usage-row {
+  spacing: 12px;
+  min-width: 340px;
+}
+
+.claude-usage-name {
+  font-weight: bold;
+  min-width: 70px;
+}
+
+.claude-usage-bar {
+  font-family: monospace;
+}
+
+.claude-usage-pct {
+  min-width: 48px;
+  text-align: right;
+}
+
+.claude-usage-reset {
+  font-size: 0.85em;
+  color: #9a9a9a;
+}

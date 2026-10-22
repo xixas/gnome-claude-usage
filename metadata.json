@@ -1,0 +1,12 @@
+{
+  "uuid": "claude-usage@vikas",
+  "name": "Claude Usage",
+  "description": "Unofficial. Shows your Claude plan limits (session / week) in the top bar, using Claude Code's login.",
+  "shell-version": [
+    "48",
+    "49",
+    "50"
+  ],
+  "version": 2,
+  "settings-schema": "org.gnome.shell.extensions.claude-usage"
+}

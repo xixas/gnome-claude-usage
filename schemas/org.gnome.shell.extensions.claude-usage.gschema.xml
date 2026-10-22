@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.claude-usage" path="/org/gnome/shell/extensions/claude-usage/">
+    <key name="bar-limits" type="as">
+      <default>['five_hour', 'seven_day']</default>
+      <summary>Limits shown in the top bar (API keys)</summary>
+    </key>
+    <key name="last-usage" type="s">
+      <default>''</default>
+      <summary>Last usage response (numbers only, no token); lets the settings window list limits and draw its preview</summary>
+    </key>
+    <key name="short-labels" type="b">
+      <default>false</default>
+      <summary>Prefix each number with S / W / model initial (always on when 3+ numbers are shown)</summary>
+    </key>
+    <key name="number-mode" type="s">
+      <choices><choice value="used"/><choice value="left"/></choices>
+      <default>'used'</default>
+      <summary>Show percent used or percent left</summary>
+    </key>
+    <key name="color-by" type="s">
+      <choices><choice value="pace"/><choice value="usage"/></choices>
+      <default>'pace'</default>
+      <summary>Colour by projected usage at reset (pace) or by usage now</summary>
+    </key>
+    <key name="color-enabled" type="b">
+      <default>true</default>
+      <summary>Tint the indicator green / amber / red</summary>
+    </key>
+    <key name="warn-at" type="i">
+      <range min="1" max="100"/>
+      <default>50</default>
+      <summary>Amber from this percent used (usage colouring)</summary>
+    </key>
+    <key name="hot-at" type="i">
+      <range min="1" max="100"/>
+      <default>80</default>
+      <summary>Red from this percent used (usage colouring)</summary>
+    </key>
+    <key name="countdown-mode" type="s">
+      <choices><choice value="never"/><choice value="alert"/><choice value="always"/></choices>
+      <default>'alert'</default>
+      <summary>When to show the countdown in the top bar</summary>
+    </key>
+    <key name="time-style" type="s">
+      <choices><choice value="remaining"/><choice value="clock"/></choices>
+      <default>'remaining'</default>
+      <summary>Countdown as time left or as clock time</summary>
+    </key>
+    <key name="refresh-minutes" type="i">
+      <range min="1" max="60"/>
+      <default>5</default>
+      <summary>Minutes between usage fetches</summary>
+    </key>
+  </schema>
+</schemalist>

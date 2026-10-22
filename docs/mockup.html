@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Claude Usage Mockup</title>
+<style>
+  :root {
+    --bg: #f6f5f4; --fg: #241f31; --muted: #5e5c64; --card: #ffffff; --border: #deddda;
+    --panel: #000000; --panel-fg: #ffffff;
+    --menu: #303030; --menu-fg: #ffffff; --menu-dim: #9a9996; --menu-sep: #4a4a4a;
+    --ok: #8ff0a4; --warn: #f6d32d; --hot: #ff7b63; --off: #9a9996;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --bg: #1e1e1e; --fg: #ffffff; --muted: #c0bfbc; --card: #2a2a2a; --border: #3d3d3d; }
+  }
+  :root[data-theme="dark"] { --bg: #1e1e1e; --fg: #ffffff; --muted: #c0bfbc; --card: #2a2a2a; --border: #3d3d3d; }
+
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 Cantarell, "Inter", system-ui, sans-serif; }
+  main { max-width: 900px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font-size: 1.6rem; margin: 0 0 4px; }
+  .lead { color: var(--muted); margin: 0 0 28px; }
+  h2 { font-size: 1.05rem; margin: 32px 0 10px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; overflow: hidden; }
+
+  /* GNOME top bar */
+  .panel { background: var(--panel); color: var(--panel-fg); height: 32px; border-radius: 8px; display: flex; align-items: center;
+           justify-content: space-between; padding: 0 10px; font-size: 14px; font-weight: 700; gap: 8px; }
+  .panel .ws { display: flex; gap: 5px; align-items: center; }
+  .panel .ws i { width: 7px; height: 7px; border-radius: 4px; background: #ffffff80; display: block; }
+  .panel .ws i.on { width: 26px; background: #fff; }
+  .panel .right { display: flex; align-items: center; gap: 4px; }
+  .pill { display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px; border-radius: 99px; }
+  .pill.active { background: #ffffff26; }
+  .sys { display: inline-flex; gap: 10px; padding: 3px 9px; opacity: .95; }
+  .sys svg, .pill svg { width: 16px; height: 16px; fill: currentColor; display: block; }
+  .cd { display: inline-flex; align-items: center; gap: 3px; margin-left: 6px; opacity: .85; font-weight: 600; }
+  .cd svg { width: 13px; height: 13px; }
+  .ok { color: var(--ok); } .warn { color: var(--warn); } .hot { color: var(--hot); } .off { color: var(--off); }
+
+  .states { display: grid; gap: 14px; }
+  .state { display: grid; grid-template-columns: 1fr; gap: 6px; }
+  .state p { margin: 0; color: var(--muted); font-size: .9rem; }
+
+  /* Popup menu */
+  .stage { background: linear-gradient(135deg, #3d2b5a, #1c2b44); border-radius: 12px; padding: 0 0 24px; }
+  .stage .panel { border-radius: 12px 12px 0 0; }
+  .menu-wrap { display: flex; justify-content: flex-end; padding: 6px 90px 0 16px; }
+  .menu { background: var(--menu); color: var(--menu-fg); border-radius: 14px; padding: 8px; width: 380px; max-width: 100%;
+          box-shadow: 0 6px 24px #0008; font-size: 14px; position: relative; }
+  .menu::before { content: ""; position: absolute; top: -8px; right: 46px; border: 8px solid transparent; border-top: 0; border-bottom-color: var(--menu); }
+  .row { padding: 8px 12px; }
+  .line { display: flex; align-items: center; gap: 12px; }
+  .name { font-weight: 700; min-width: 70px; }
+  .bar { font-family: "Source Code Pro", ui-monospace, monospace; flex: 1; letter-spacing: 1px; }
+  .pct { min-width: 44px; text-align: right; }
+  .reset { color: var(--menu-dim); font-size: .85em; }
+  .sep { height: 1px; background: var(--menu-sep); margin: 6px 12px; }
+  .item { padding: 8px 12px; border-radius: 8px; }
+  .item.dim { color: var(--menu-dim); }
+  .item.act:hover { background: #ffffff1a; }
+
+  table { width: 100%; border-collapse: collapse; font-size: .92rem; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 600; }
+  .sw { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -1px; margin-right: 6px; }
+  code { font-size: .88em; }
+
+
+  .menu.nopt::before { display: none; }
+  .verdict { padding: 10px 12px 6px; font-weight: 700; font-size: 15px; }
+  .verdict small { display: block; font-weight: 400; color: var(--menu-dim); font-size: .85em; }
+  .math { font-family: ui-monospace, monospace; font-size: .85rem; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin: 10px 0 0; white-space: pre-wrap; }
+  /* libadwaita-style preferences window */
+  .adw { background: #242424; color: #fff; border-radius: 12px; max-width: 620px; margin: 0 auto; box-shadow: 0 8px 30px #0006; overflow: hidden; }
+  .adw-head { display: flex; align-items: center; justify-content: center; position: relative; height: 46px; background: #303030; font-weight: 700; }
+  .adw-head .x { position: absolute; right: 10px; width: 24px; height: 24px; border-radius: 12px; background: #ffffff1a; display: grid; place-items: center; font-size: 13px; }
+  .adw-body { padding: 18px 20px 24px; }
+  .grp-title { font-weight: 700; font-size: .92rem; margin: 18px 4px 4px; }
+  .grp-desc { color: #c0bfbc; font-size: .85rem; margin: 0 4px 8px; }
+  .boxed { background: #383838; border-radius: 12px; overflow: hidden; }
+  .arow { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-top: 1px solid #ffffff12; min-height: 52px; }
+  .arow:first-child { border-top: 0; }
+  .arow .t { flex: 1; } .arow .t small { display: block; color: #c0bfbc; font-size: .82rem; }
+  .sw2 { width: 42px; height: 24px; border-radius: 12px; background: #ffffff26; position: relative; flex: none; }
+  .sw2::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 9px; background: #fff; }
+  .sw2.on { background: #3584e4; } .sw2.on::after { left: 21px; }
+  .combo { background: #ffffff14; border-radius: 6px; padding: 4px 10px; font-size: .9rem; flex: none; }
+  .combo::after { content: " ▾"; color: #c0bfbc; }
+  .seg { display: inline-flex; background: #ffffff14; border-radius: 6px; padding: 2px; flex: none; }
+  .seg span { padding: 3px 10px; border-radius: 5px; font-size: .88rem; } .seg span.on { background: #ffffff2a; font-weight: 700; }
+  .preview { margin: 4px 0 6px; }
+  .lbl { opacity: .7; font-weight: 600; margin-right: 2px; }
+
+  @media (max-width: 560px) {
+    .panel .clock, .panel .ws { display: none; }
+    .menu-wrap { padding: 6px 8px 0; }
+    .menu::before { right: 30px; }
+  }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="claude" viewBox="0 0 16 16">
+    <circle cx="8" cy="8" r="1.9"/>
+    <path d="M8.95,6.80 L8.55,0.60 L7.45,0.60 L7.05,6.80 Z M9.45,7.50 L12.03,2.75 L11.11,2.15 L7.85,6.48 Z M9.49,8.37 L14.78,5.51 L14.32,4.51 L8.70,6.64 Z M9.05,9.11 L14.06,9.43 L14.22,8.34 L9.32,7.23 Z M8.28,9.50 L12.93,13.00 L13.65,12.17 L9.53,8.07 Z M7.43,9.42 L9.39,14.68 L10.44,14.37 L9.25,8.88 Z M6.75,8.88 L5.39,14.95 L6.44,15.26 L8.57,9.42 Z M6.47,8.07 L2.80,11.78 L3.52,12.61 L7.72,9.50 Z M6.68,7.23 L0.99,8.45 L1.15,9.54 L6.95,9.11 Z M7.30,6.64 L2.22,4.76 L1.77,5.76 L6.51,8.37 Z M8.15,6.48 L4.57,1.65 L3.64,2.24 L6.55,7.50 Z"/>
+  </symbol>
+  <symbol id="warning" viewBox="0 0 16 16">
+    <path d="M8 1.2c-.5 0-.9.3-1.2.7L.9 12.6c-.5.9.2 2 1.2 2h11.8c1 0 1.7-1.1 1.2-2L9.2 1.9C8.9 1.5 8.5 1.2 8 1.2zM7 5h2v5H7zm0 6h2v2H7z"/>
+  </symbol>
+  <symbol id="timer" viewBox="0 0 16 16"><path d="M6 0h4v1.5H6zM8 2.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zm0 1.6a4.9 4.9 0 1 1 0 9.8 4.9 4.9 0 0 1 0-9.8zM7.2 5.5v3.8l2.8 1.7.8-1.3-2.1-1.3V5.5z"/></symbol>
+  <symbol id="hourglass" viewBox="0 0 16 16"><path d="M3 1h10v1.5h-1v1.8c0 1.4-.9 2.7-2.2 3.2v1c1.3.5 2.2 1.8 2.2 3.2v1.8h1V15H3v-1.5h1v-1.8c0-1.4.9-2.7 2.2-3.2v-1C4.9 7 4 5.7 4 4.3V2.5H3zm2.5 1.5v1.8c0 1 .7 1.9 1.7 2.2l.3.1v2.8l-.3.1c-1 .3-1.7 1.2-1.7 2.2v.3h5v-.3c0-1-.7-1.9-1.7-2.2l-.3-.1V7.1l.3-.1c1-.3 1.7-1.2 1.7-2.2V2.5z"/></symbol>
+  <symbol id="wifi" viewBox="0 0 16 16"><path d="M8 2C5 2 2.3 3.1.3 5L8 14l7.7-9C13.7 3.1 11 2 8 2z"/></symbol>
+  <symbol id="vol" viewBox="0 0 16 16"><path d="M1 5h3l4-3v12l-4-3H1zM10 4.5a5 5 0 0 1 0 7v-1.6a3.4 3.4 0 0 0 0-3.8zm0-3a8 8 0 0 1 0 13v-1.7a6.4 6.4 0 0 0 0-9.6z"/></symbol>
+  <symbol id="bat" viewBox="0 0 16 16"><path d="M5 1h6v1h2v13H3V2h2zM4.5 6v7.5h7V6z"/></symbol>
+</svg>
+
+<main>
+  <h1>Claude Usage — top bar mockup</h1>
+  <p class="lead">How the <code>claude-usage@vikas</code> extension sits in the GNOME top bar: a Claude spark icon followed by <b>session % · week %</b>, tinted by the busiest limit.</p>
+
+  <h2>Panel states</h2>
+  <div class="card states">
+    <div class="state">
+      <div class="panel"><span class="ws"><i class="on"></i><i></i><i></i></span><span class="clock">Oct 22 10:40 AM</span>
+        <span class="right"><span class="pill ok"><svg><use href="#claude"/></svg>9% · 41%</span><span class="sys"><svg><use href="#wifi"/></svg><svg><use href="#vol"/></svg><svg><use href="#bat"/></svg></span></span></div>
+      <p><b class="ok">Green</b> — every limit under 50%.</p>
+    </div>
+    <div class="state">
+      <div class="panel"><span class="ws"><i class="on"></i><i></i><i></i></span><span class="clock">Oct 22 3:15 PM</span>
+        <span class="right"><span class="pill warn"><svg><use href="#claude"/></svg>62% · 58%</span><span class="sys"><svg><use href="#wifi"/></svg><svg><use href="#vol"/></svg><svg><use href="#bat"/></svg></span></span></div>
+      <p><b class="warn">Amber</b> — any limit at 50–79%.</p>
+    </div>
+    <div class="state">
+      <div class="panel"><span class="ws"><i class="on"></i><i></i><i></i></span><span class="clock">Oct 24 6:02 PM</span>
+        <span class="right"><span class="pill hot"><svg><use href="#claude"/></svg>91% · 84%</span><span class="sys"><svg><use href="#wifi"/></svg><svg><use href="#vol"/></svg><svg><use href="#bat"/></svg></span></span></div>
+      <p><b class="hot">Red</b> — any limit at 80% or above.</p>
+    </div>
+    <div class="state">
+      <div class="panel"><span class="ws"><i class="on"></i><i></i><i></i></span><span class="clock">Oct 25 9:00 AM</span>
+        <span class="right"><span class="pill off"><svg><use href="#warning"/></svg>--</span><span class="sys"><svg><use href="#wifi"/></svg><svg><use href="#vol"/></svg><svg><use href="#bat"/></svg></span></span></div>
+      <p><b class="off">Grey</b> — token expired, offline or API error; the theme's warning icon replaces the spark.</p>
+    </div>
+  </div>
+
+  <h2>Reset countdown — shown only when amber or red</h2>
+  <div class="card states">
+    <div class="state">
+      <div class="panel"><span class="ws"><i class="on"></i><i></i><i></i></span><span class="clock">Oct 22 10:40 AM</span>
+        <span class="right"><span class="pill ok"><svg><use href="#claude"/></svg>9% · 41%</span><span class="sys"><svg><use href="#wifi"/></svg><svg><use href="#vol"/></svg><svg><use href="#bat"/></svg></span></span></div>
+      <p><b class="ok">Green</b> — no countdown; the panel stays compact. Reset times are in the menu.</p>
+    </div>
+    <div class="state">
+      <div class="panel"><span class="ws"><i class="on"></i><i></i><i></i></span><span class="clock">Oct 22 3:15 PM</span>
+        <span class="right"><span class="pill warn"><svg><use href="#claude"/></svg>62% · 41%<span class="cd"><svg><use href="#timer"/></svg>3h15m</span></span><span class="sys"><svg><use href="#wifi"/></svg><svg><use href="#vol"/></svg><svg><use href="#bat"/></svg></span></span></div>
+      <p><b class="warn">Amber, set by the session</b> — countdown is to the <i>session</i> reset.</p>
+    </div>
+    <div class="state">
+      <div class="panel"><span class="ws"><i class="on"></i><i></i><i></i></span><span class="clock">Oct 23 11:00 AM</span>
+        <span class="right"><span class="pill warn"><svg><use href="#claude"/></svg>22% · 63%<span class="cd"><svg><use href="#timer"/></svg>1d2h</span></span><span class="sys"><svg><use href="#wifi"/></svg><svg><use href="#vol"/></svg><svg><use href="#bat"/></svg></span></span></div>
+      <p><b class="warn">Amber, set by the week</b> — countdown follows the limit that set the colour, so it is the <i>weekly</i> reset, not the session one.</p>
+    </div>
+    <div class="state">
+      <div class="panel"><span class="ws"><i class="on"></i><i></i><i></i></span><span class="clock">Oct 24 6:02 PM</span>
+        <span class="right"><span class="pill hot"><svg><use href="#claude"/></svg>91% · 84%<span class="cd"><svg><use href="#timer"/></svg>42m</span></span><span class="sys"><svg><use href="#wifi"/></svg><svg><use href="#vol"/></svg><svg><use href="#bat"/></svg></span></span></div>
+      <p><b class="hot">Red</b> — time until you are unblocked. The countdown updates every minute between the 5-minute data refreshes.</p>
+    </div>
+  </div>
+
+  <h2>Menu open</h2>
+  <div class="stage">
+    <div class="panel"><span class="ws"><i class="on"></i><i></i><i></i></span><span class="clock">Oct 22 10:40 AM</span>
+      <span class="right"><span class="pill ok active"><svg><use href="#claude"/></svg>9% · 41%</span><span class="sys"><svg><use href="#wifi"/></svg><svg><use href="#vol"/></svg><svg><use href="#bat"/></svg></span></span></div>
+    <div class="menu-wrap">
+      <div class="menu" role="menu">
+        <div class="row"><div class="line"><span class="name">Session</span><span class="bar ok">▰▱▱▱▱▱▱▱▱▱</span><span class="pct">9%</span></div>
+          <div class="reset">resets Wed 12:30 PM · in 1h 50m</div></div>
+        <div class="row"><div class="line"><span class="name">Week</span><span class="bar ok">▰▰▰▰▱▱▱▱▱▱</span><span class="pct">41%</span></div>
+          <div class="reset">resets Thu 1:30 PM · in 1d 2h</div></div>
+        <div class="row"><div class="line"><span class="name">Fable</span><span class="bar ok">▰▰▱▱▱▱▱▱▱▱</span><span class="pct">15%</span></div>
+          <div class="reset">resets Thu 1:30 PM · in 1d 2h</div></div>
+        <div class="sep"></div>
+        <div class="item dim">Updated 10:40 AM</div>
+        <div class="item act">Refresh now</div>
+        <div class="item act">Settings…</div>
+      </div>
+    </div>
+  </div>
+
+  <h2>Pace — "on track?" (proposed)</h2>
+  <p class="lead" style="margin-bottom:12px">Colour and a one-line verdict follow where you'll <b>end up at reset</b> at your current pace, not just how much you've used — like the web's "On track" line.</p>
+  <div class="card states">
+    <div class="state">
+      <div class="panel"><span class="ws"><i class="on"></i><i></i><i></i></span><span class="clock">Oct 22 12:18 PM</span><span class="right"><span class="pill ok"><svg><use href="#claude"/></svg>85% · 41%</span><span class="sys"><svg><use href="#wifi"/></svg><svg><use href="#vol"/></svg><svg><use href="#bat"/></svg></span></span></div>
+      <p><b class="ok">Green although 85% used</b> — the session resets in 12 min; at this pace you'd end around 88%. Plain-usage colouring would have shown red here.</p>
+    </div>
+    <div class="state">
+      <div class="panel"><span class="ws"><i class="on"></i><i></i><i></i></span><span class="clock">Oct 22 9:40 AM</span><span class="right"><span class="pill warn"><svg><use href="#claude"/></svg>22% · 41%<span class="cd"><svg><use href="#timer"/></svg>3h50m</span></span><span class="sys"><svg><use href="#wifi"/></svg><svg><use href="#vol"/></svg><svg><use href="#bat"/></svg></span></span></div>
+      <p><b class="warn">Amber at only 22%</b> — 22% gone in the first 70 min of a 5-hour window; at this pace you'd end around 94%, cutting it close.</p>
+    </div>
+    <div class="state">
+      <div class="panel"><span class="ws"><i class="on"></i><i></i><i></i></span><span class="clock">Oct 22 12:05 PM</span><span class="right"><span class="pill hot"><svg><use href="#claude"/></svg>97% · 41%<span class="cd"><svg><use href="#timer"/></svg>25m</span></span><span class="sys"><svg><use href="#wifi"/></svg><svg><use href="#vol"/></svg><svg><use href="#bat"/></svg></span></span></div>
+      <p><b class="hot">Red</b> — at this pace you run out in about 8 min, 17 min before the reset.</p>
+    </div>
+  </div>
+
+  <div class="stage" style="margin-top:14px;padding:16px;display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(280px,1fr))">
+    <div class="menu nopt" style="width:100%;max-width:400px"><div class="verdict "><span class="ok">On track</span><small>You should reach the session reset with room to spare.</small></div><div class="sep"></div><div class="row"><div class="line"><span class="name">Session</span><span class="bar ok">▰▰▰▰▰▰▰▰▱▱</span><span class="pct">85%</span></div><div class="reset">resets 12:30 PM · in 12m · pace ≈ 88%</div></div><div class="row"><div class="line"><span class="name">Week</span><span class="bar ok">▰▰▰▰▱▱▱▱▱▱</span><span class="pct">41%</span></div><div class="reset">resets Thu 1:30 PM · pace ≈ 49%</div></div></div>
+    <div class="menu nopt" style="width:100%;max-width:400px"><div class="verdict "><span class="warn">Cutting it close</span><small>At this pace you'll end the session around 94%.</small></div><div class="sep"></div><div class="row"><div class="line"><span class="name">Session</span><span class="bar warn">▰▰▱▱▱▱▱▱▱▱</span><span class="pct">22%</span></div><div class="reset">resets 1:30 PM · in 3h50m · pace ≈ 94%</div></div><div class="row"><div class="line"><span class="name">Week</span><span class="bar ok">▰▰▰▰▱▱▱▱▱▱</span><span class="pct">41%</span></div><div class="reset">resets Thu 1:30 PM · pace ≈ 49%</div></div></div>
+  </div>
+  <div class="math">pace at reset = used% ÷ (time elapsed ÷ window)      window: session 5 h, week / model 7 d
+green: pace &lt; 90%   amber: pace 90–100% or used ≥ 80% with reset far off   red: you run out before the reset
+first 10% of a window: too early to judge → colour by plain usage</div>
+
+  <h2>How the top bar says "on track" — two options</h2>
+  <p class="lead" style="margin-bottom:12px">The sentence ("On track…") only fits in the menu. In the bar, the signal has to be the colour plus the small icon and time on the right.</p>
+  <div class="card states">
+  <p style="margin:0;font-weight:700">Option 1 — colour only</p>
+    <div class="state">
+      <div class="panel"><span class="ws"><i class="on"></i><i></i><i></i></span><span class="clock">Oct 22 12:18 PM</span><span class="right"><span class="pill ok"><svg><use href="#claude"/></svg>85% · 41%</span><span class="sys"><svg><use href="#wifi"/></svg><svg><use href="#vol"/></svg><svg><use href="#bat"/></svg></span></span></div>
+      <p><b class="ok">On track</b> — green, nothing extra.</p>
+    </div>
+    <div class="state">
+      <div class="panel"><span class="ws"><i class="on"></i><i></i><i></i></span><span class="clock">Oct 22 9:40 AM</span><span class="right"><span class="pill warn"><svg><use href="#claude"/></svg>22% · 41%<span class="cd"><svg><use href="#timer"/></svg>3h50m</span></span><span class="sys"><svg><use href="#wifi"/></svg><svg><use href="#vol"/></svg><svg><use href="#bat"/></svg></span></span></div>
+      <p><b class="warn">Cutting it close</b> — amber + time to reset.</p>
+    </div>
+    <div class="state">
+      <div class="panel"><span class="ws"><i class="on"></i><i></i><i></i></span><span class="clock">Oct 22 12:05 PM</span><span class="right"><span class="pill hot"><svg><use href="#claude"/></svg>97% · 41%<span class="cd"><svg><use href="#timer"/></svg>25m</span></span><span class="sys"><svg><use href="#wifi"/></svg><svg><use href="#vol"/></svg><svg><use href="#bat"/></svg></span></span></div>
+      <p><b class="hot">Running out</b> — red + time to <i>reset</i> (25m). You can't see that you run out in 8 min without opening the menu.</p>
+    </div>
+  <p style="margin:8px 0 0;font-weight:700">Option 2 — the icon changes when you'll run out (recommended)</p>
+    <div class="state">
+      <div class="panel"><span class="ws"><i class="on"></i><i></i><i></i></span><span class="clock">Oct 22 12:18 PM</span><span class="right"><span class="pill ok"><svg><use href="#claude"/></svg>85% · 41%</span><span class="sys"><svg><use href="#wifi"/></svg><svg><use href="#vol"/></svg><svg><use href="#bat"/></svg></span></span></div>
+      <p><b class="ok">On track</b> — green, nothing extra. No icon means nothing to worry about.</p>
+    </div>
+    <div class="state">
+      <div class="panel"><span class="ws"><i class="on"></i><i></i><i></i></span><span class="clock">Oct 22 9:40 AM</span><span class="right"><span class="pill warn"><svg><use href="#claude"/></svg>22% · 41%<span class="cd"><svg><use href="#timer"/></svg>3h50m</span></span><span class="sys"><svg><use href="#wifi"/></svg><svg><use href="#vol"/></svg><svg><use href="#bat"/></svg></span></span></div>
+      <p><b class="warn">Cutting it close</b> — amber + stopwatch <b>time to reset</b>.</p>
+    </div>
+    <div class="state">
+      <div class="panel"><span class="ws"><i class="on"></i><i></i><i></i></span><span class="clock">Oct 22 12:05 PM</span><span class="right"><span class="pill hot"><svg><use href="#claude"/></svg>97% · 41%<span class="cd"><svg><use href="#hourglass"/></svg>8m</span></span><span class="sys"><svg><use href="#wifi"/></svg><svg><use href="#vol"/></svg><svg><use href="#bat"/></svg></span></span></div>
+      <p><b class="hot">Running out</b> — red + hourglass <b>time until you run out</b> (8m). The menu still says "resets in 25m".</p>
+    </div>
+  </div>
+
+  <div class="card states" style="margin-top:14px">
+  <p style="margin:0;font-weight:700">"Show as" setting — same moments, two styles</p>
+    <div class="state"><div class="panel"><span class="ws"><i class="on"></i><i></i><i></i></span><span class="clock">Oct 22 9:40 AM</span><span class="right"><span class="pill warn"><svg><use href="#claude"/></svg>22% · 41%<span class="cd"><svg><use href="#timer"/></svg>3h50m</span></span><span class="sys"><svg><use href="#wifi"/></svg><svg><use href="#vol"/></svg><svg><use href="#bat"/></svg></span></span></div><p>Time left — resets in 3h50m.</p></div>
+    <div class="state"><div class="panel"><span class="ws"><i class="on"></i><i></i><i></i></span><span class="clock">Oct 22 9:40 AM</span><span class="right"><span class="pill warn"><svg><use href="#claude"/></svg>22% · 41%<span class="cd"><svg><use href="#timer"/></svg>1:30 PM</span></span><span class="sys"><svg><use href="#wifi"/></svg><svg><use href="#vol"/></svg><svg><use href="#bat"/></svg></span></span></div><p>Clock — resets at 1:30 PM. (Weekly resets show the day: <code>Thu 1:30 PM</code>.)</p></div>
+    <div class="state"><div class="panel"><span class="ws"><i class="on"></i><i></i><i></i></span><span class="clock">Oct 22 12:05 PM</span><span class="right"><span class="pill hot"><svg><use href="#claude"/></svg>97% · 41%<span class="cd"><svg><use href="#hourglass"/></svg>8m</span></span><span class="sys"><svg><use href="#wifi"/></svg><svg><use href="#vol"/></svg><svg><use href="#bat"/></svg></span></span></div><p>Time left — runs out in 8 min.</p></div>
+    <div class="state"><div class="panel"><span class="ws"><i class="on"></i><i></i><i></i></span><span class="clock">Oct 22 12:05 PM</span><span class="right"><span class="pill hot"><svg><use href="#claude"/></svg>97% · 41%<span class="cd"><svg><use href="#hourglass"/></svg>12:13 PM</span></span><span class="sys"><svg><use href="#wifi"/></svg><svg><use href="#vol"/></svg><svg><use href="#bat"/></svg></span></span></div><p>Clock — runs out at about 12:13 PM.</p></div>
+  </div>
+
+  <h2>Settings window (proposed)</h2>
+  <p class="lead" style="margin-bottom:12px">Opened from <b>Settings…</b> in the menu or from the Extensions app. Changes apply to the top bar instantly — no reload — and the preview at the top of the window redraws with them.</p>
+  <div class="adw">
+    <div class="adw-head">Claude Usage<span class="x">✕</span></div>
+    <div class="adw-body">
+      <div class="grp-title">Preview</div>
+      <p class="grp-desc">Your latest numbers, redrawn as you change anything below.</p>
+      <div style="display:flex;justify-content:flex-end;margin-bottom:6px"><div class="panel" style="display:inline-flex;border-radius:9px"><span class="right"><span class="pill ok"><svg><use href="#claude"/></svg><span class="lbl">S</span>9% · <span class="lbl">W</span>41% · <span class="lbl">F</span>15%</span></span></div></div>
+
+      <div class="grp-title">Show in top bar</div>
+      <p class="grp-desc">One switch per limit your plan has (e.g. Opus or Sonnet would appear here too). Every limit is always in the menu.</p>
+      <div class="boxed">
+        <div class="arow"><span class="t">Session<small>5-hour window</small></span><span class="sw2 on"></span></div>
+        <div class="arow"><span class="t">Week<small>All models</small></span><span class="sw2 on"></span></div>
+        <div class="arow"><span class="t">Fable<small>Weekly, model-specific</small></span><span class="sw2 on"></span></div>
+        <div class="arow"><span class="t">Short labels<small>S = Session, W = Week, F = Fable before each number. Always on when 3+ are shown</small></span><span class="sw2 on"></span></div>
+      </div>
+
+      <div class="grp-title">Display</div>
+      <div class="boxed">
+        <div class="arow"><span class="t">Numbers show<small>Used: 9% · Left: 91%</small></span><span class="seg"><span class="on">Used</span><span>Left</span></span></div>
+        <div class="arow"><span class="t">Colour by<small>Pace = where you'll be at reset · Usage = % used now</small></span><span class="seg"><span class="on">Pace</span><span>Usage</span></span></div>
+        <div class="arow"><span class="t">Colour coding<small>Off = plain panel colour, like other icons</small></span><span class="sw2 on"></span></div>
+        <div class="arow"><span class="t">Amber from / Red from<small>Used when colouring by usage</small></span><span class="combo">50%</span><span class="combo">80%</span></div>
+      </div>
+
+      <div class="grp-title">Countdown</div>
+      <div class="boxed">
+        <div class="arow"><span class="t">Show countdown<small>For the limit that set the colour</small></span><span class="combo">When amber or red</span></div>
+        <div class="arow"><span class="t">Show as<small>Time left: ⏱ 1h50m · ⌛ 8m &nbsp;|&nbsp; Clock: ⏱ 12:30 PM · ⌛ 12:13 PM</small></span><span class="seg"><span class="on">Time left</span><span>Clock</span></span></div>
+      </div>
+
+      <div class="grp-title">Updates</div>
+      <div class="boxed">
+        <div class="arow"><span class="t">Refresh every</span><span class="combo">5 minutes</span></div>
+      </div>
+    </div>
+  </div>
+
+  <h2>Colour rules</h2>
+  <div class="card">
+    <table>
+      <tr><th>Colour</th><th>When</th><th>Applies to</th></tr>
+      <tr><td><span class="sw" style="background:var(--ok)"></span>Green <code>#8ff0a4</code></td><td>highest limit &lt; 50%</td><td>icon, text, that row's bar</td></tr>
+      <tr><td><span class="sw" style="background:var(--warn)"></span>Amber <code>#f6d32d</code></td><td>50–79%</td><td>icon, text, that row's bar</td></tr>
+      <tr><td><span class="sw" style="background:var(--hot)"></span>Red <code>#ff7b63</code></td><td>≥ 80%</td><td>icon, text, that row's bar</td></tr>
+      <tr><td><span class="sw" style="background:var(--off)"></span>Grey <code>#9a9996</code></td><td>no fresh data</td><td>warning icon + <code>--</code></td></tr>
+    </table>
+  </div>
+</main>
+</body>
+</html>
