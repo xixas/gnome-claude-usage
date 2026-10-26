@@ -123,8 +123,9 @@ export function summarise(data, settings, now = Date.now()) {
             return info;
         });
 
-    // worst level first, then furthest along
-    const score = i => i.level * 1000 + (i.pace ?? i.used);
+    // worst level first, then furthest along — by the same measure the colour uses
+    const paced = settings.get_string('color-by') === 'pace';
+    const score = i => i.level * 1000 + ((paced ? i.pace : null) ?? i.used);
     const top = limits.reduce((a, b) => (score(b) > score(a) ? b : a), limits[0]) ?? null;
 
     const shown = limits.filter(i => settings.get_strv('bar-limits').includes(i.key));
