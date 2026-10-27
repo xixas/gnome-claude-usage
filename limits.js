@@ -92,9 +92,9 @@ export function clockText(ms) {
     return when.format(sameDay ? '%-I:%M %p' : '%a %-I:%M %p');
 }
 
-// ---- Working hours: weekly pace counts only these, so nights, weekends and days off don't dilute it ----
+// ---- Working hours: weekly pace counts only these, so nights and weekends don't dilute it ----
 
-// {days: Set of 1–7 (ISO, Mon = 1), start, end (hours), dayOff: 'YYYY-MM-DD' | ''} or null for calendar time
+// {days: Set of 1–7 (ISO, Mon = 1), start, end (hours)} or null for calendar time
 export function scheduleOf(settings) {
     if (settings.get_string('pace-hours') !== 'work')
         return null;
@@ -102,7 +102,7 @@ export function scheduleOf(settings) {
     const start = settings.get_int('work-start'), end = settings.get_int('work-end');
     if (!days.size || end <= start)
         return null;
-    return {days, start, end, dayOff: settings.get_string('day-off')};
+    return {days, start, end};
 }
 
 function midnight(ms) {
@@ -113,7 +113,7 @@ function midnight(ms) {
 // Each working stretch [from, to) in ms that overlaps [fromMs, toMs), in order
 function* workSpans(fromMs, toMs, sched) {
     for (let day = midnight(fromMs); day.to_unix() * 1000 < toMs; day = day.add_days(1)) {
-        if (!sched.days.has(day.get_day_of_week()) || day.format('%F') === sched.dayOff)
+        if (!sched.days.has(day.get_day_of_week()))
             continue;
         const s = Math.max(day.add_hours(sched.start).to_unix() * 1000, fromMs);
         const e = Math.min(day.add_hours(sched.end).to_unix() * 1000, toMs);
@@ -159,7 +159,10 @@ function recentRate(history, used, nowMs) {
 
 // One limit: % used, reset, projected % at reset (pace), when it runs out before the reset (outMs),
 // level (0 green · 1 amber · 2 red), pillLevel (what it may do to the whole indicator) and why (reason).
+// Pace and run-out are worked out as of opts.asOf, when `used` was measured, so they hold still between
+// fetches; nowMs only decides whether a reset has passed and how close things are.
 function analyse(key, value, nowMs, opts) {
+    const asOf = Math.min(opts.asOf ?? nowMs, nowMs);
     const used = value.utilization;
     const info = {key, used, pct: Math.round(used), resetMs: null, pace: null, outMs: null,
         level: 0, pillLevel: 0, reason: 'fine', stale: false, recent: false};
@@ -183,13 +186,13 @@ function analyse(key, value, nowMs, opts) {
             total = window;
         }
         // Floored at 10% of the window, so an early burst projects cautiously instead of not at all
-        const elapsed = Math.max(workMs(start, nowMs, sched), total * 0.1);
+        const elapsed = Math.max(workMs(start, asOf, sched), total * 0.1);
         info.pace = used * total / elapsed;
         if (used > 0 && used < 100)
-            info.outMs = advance(nowMs, (100 - used) * elapsed / used, info.resetMs, sched);
+            info.outMs = advance(asOf, (100 - used) * elapsed / used, info.resetMs, sched);
         if (key === SESSION && used < 100) {
-            const rate = recentRate(opts.history, used, nowMs);
-            const out = rate > 0 ? nowMs + (100 - used) / rate : null;
+            const rate = recentRate(opts.history, used, asOf);
+            const out = rate > 0 ? asOf + (100 - used) / rate : null;
             if (out !== null && out < info.resetMs && (info.outMs === null || out < info.outMs))
                 Object.assign(info, {outMs: out, recent: true});
         }
@@ -208,6 +211,9 @@ function analyse(key, value, nowMs, opts) {
     else if (100 - used <= 2 && left > 30 * MIN)
         Object.assign(info, {level: 2, reason: 'almost'});
     // Red only when the run-out is close (or nearly everything is used): a slight overshoot hours away is amber
+    // The run-out projected at the last fetch has already passed: it may be used up by now — refetch to know
+    else if (info.outMs !== null && info.outMs <= nowMs)
+        Object.assign(info, {level: 2, reason: 'lapsed'});
     else if (info.outMs !== null && (workMs(nowMs, info.outMs, sched) <= soon || used >= 90))
         Object.assign(info, {level: 2, reason: 'out'});
     else if (info.outMs !== null)
@@ -227,35 +233,42 @@ function blockAt(info, nowMs) {
 // limits (all, session → week → models, for the menu), top (the limit that sets the colour and verdict),
 // parts ([{text, level}] for the bar label), text (plain label), cd ({kind: 'reset' | 'out', ms, level} or null,
 // coloured by the limit it counts down for)
-// and stale (a window rolled over since the fetch). history: recent session samples [{t, used}];
-// wasRed: keys that were red last time (they stay red a little longer, so the colour doesn't flap).
-export function summarise(data, settings, now = Date.now(), history = [], wasRed = new Set()) {
+// and refetch (a window rolled over, or a run-out passed, since the fetch). history: recent session samples [{t, used}];
+// wasRed: keys that were red last time (they stay red a little longer, so the colour doesn't flap);
+// asOf: when `data` was fetched (pace and run-out are judged at that moment).
+export function summarise(data, settings, now = Date.now(), history = [], wasRed = new Set(), asOf = now) {
     const opts = {
         schedule: scheduleOf(settings),
         amberAt: settings.get_int('amber-at'),
         modelRed: settings.get_string('model-colour') === 'red',
         history,
         wasRed,
+        asOf,
     };
     const rank = k => (k === SESSION ? 0 : k === 'seven_day' ? 1 : 2);
     const limits = Object.entries(planLimits(data))
         .map(([k, v]) => analyse(k, v, now, opts))
         .sort((a, b) => rank(a.key) - rank(b.key));
 
-    // Worst pill level wins; among equals the one that stops you first, then session → week → models
+    // A nearly used-up weekly limit with no working time left stays visible (amber text, icon green):
+    // you can't act on it at work, but weekend use would hit it
+    const offWatch = i => i.reason === 'off' && i.used >= 90;
+
+    // Worst pill level wins; among equals the one that stops you first, then session → week → models.
+    // With everything green, an offWatch limit sets the verdict, so it matches the amber number in the bar.
     const top = limits.reduce((a, b) => {
         if (b.pillLevel !== a.pillLevel)
             return b.pillLevel > a.pillLevel ? b : a;
+        if (b.pillLevel === 0 && offWatch(b) && !offWatch(a))
+            return b;
         return a.level === 2 && b.level === 2 && blockAt(b, now) < blockAt(a, now) ? b : a;
     }, limits[0]) ?? null;
 
     const left = settings.get_string('number-mode') === 'left';
     const num = i => `${left ? 100 - i.pct : i.pct}%`;
-    // A nearly used-up weekly limit with no working time left stays visible (amber text, icon green):
-    // you can't act on it at work, but weekend use would hit it
-    const offWatch = i => i.reason === 'off' && i.used >= 90;
+    const always = settings.get_string('show-limits') === 'always';
     const parts = limits
-        .filter(i => i.key === SESSION || i.level > 0 || offWatch(i))
+        .filter(i => i.key === SESSION || always || i.level > 0 || offWatch(i))
         .map(i => ({
             text: `${i.key === SESSION ? '' : `${shortFor(i.key)} `}${num(i)}${i.stale ? ' ↻' : ''}`,
             level: offWatch(i) ? 1 : i.level,
@@ -273,7 +286,9 @@ export function summarise(data, settings, now = Date.now(), history = [], wasRed
         else if (target?.resetMs != null)
             cd = {kind: 'reset', ms: target.resetMs, level: target.pillLevel};
     }
-    return {limits, top, parts, text: parts.map(p => p.text).join(' · '), cd, stale: limits.some(i => i.stale)};
+    // refetch: a window rolled over, or a projected run-out has passed, since the numbers were fetched
+    return {limits, top, parts, text: parts.map(p => p.text).join(' · '), cd,
+        refetch: limits.some(i => i.stale || i.reason === 'lapsed')};
 }
 
 // The bar label as Pango markup, each number in its own colour

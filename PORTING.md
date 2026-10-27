@@ -48,7 +48,7 @@ Example response (shape only; extra fields vary):
 ```
 window   = 5 h for five_hour, 7 d for every seven_day*
 span(a,b)= b − a for the session; for weekly limits only the working hours between a and b
-           (settings: pace-hours = work | all, work-days, work-start, work-end, day-off)
+           (settings: pace-hours = work | all, work-days, work-start, work-end)
 total    = span(resets_at − window, resets_at)
 elapsed  = max(span(resets_at − window, now), 10% of total)
 pace     = used × total / elapsed
@@ -62,7 +62,9 @@ reset passed (resets_at ≤ now) → the limit counts as 0%, "↻", and is refet
 
 **Top limit** = highest icon level; among reds, the one that stops you first; then session → week → models. It sets the icon colour and the verdict.
 
-**Bar text:** the session `9%` always, plus `W 64%` / `F 100%` for any other limit that's amber or red, each in its own colour (`100 − x` in "left" mode).
+**Bar text:** the session `9%` always, plus `W 64%` / `F 100%` for any other limit that's amber or red (or every limit, with `show-limits` = always), each in its own colour (`100 − x` in "left" mode).
+
+**As of:** pace and run-out are computed at the moment the numbers were fetched, so they hold still between fetches; the clock only moves the countdown and how close the run-out is.
 
 **Countdown** (default: always): the limit that turns the icon red and stops you first, else the session. Runs out first → hourglass + time until run-out; otherwise alarm + time until its reset. Coloured by that limit. Format `1h50m` / `1d2h`, or clock time (`12:30 PM`, `Thu 1:30 PM`).
 

@@ -14,6 +14,11 @@
       <default>true</default>
       <summary>Tint the indicator green / amber / red</summary>
     </key>
+    <key name="show-limits" type="s">
+      <choices><choice value="auto"/><choice value="always"/></choices>
+      <default>'auto'</default>
+      <summary>Week and model limits in the bar: only when amber or red, or always</summary>
+    </key>
     <key name="pace-hours" type="s">
       <choices><choice value="work"/><choice value="all"/></choices>
       <default>'work'</default>
@@ -32,10 +37,6 @@
       <range min="1" max="24"/>
       <default>19</default>
       <summary>Working hours end (hour of day)</summary>
-    </key>
-    <key name="day-off" type="s">
-      <default>''</default>
-      <summary>A date (YYYY-MM-DD) taken off; its hours don't count toward weekly pace</summary>
     </key>
     <key name="amber-at" type="i">
       <range min="50" max="100"/>

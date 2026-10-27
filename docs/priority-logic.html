@@ -77,7 +77,7 @@
   <h2 class="text-2xl font-bold">What the panel shows</h2>
   <ul class="list-disc ml-5 text-sm space-y-1 max-w-3xl">
     <li><b>Session % first, always</b>, followed by the session reset time whenever a session is active.</li>
-    <li>Week or Fable appears only when it is <b>amber or red</b>, with a letter label and its own colour.</li>
+    <li>Week or Fable appears only when it is <b>amber or red</b> (or always, if set in Settings), with a letter label and its own colour.</li>
     <li>Pill tint is the worst colour. If a non-session limit is red, its time (hourglass) replaces the session timer, because that's the one that blocks you.</li>
   </ul>
   <div class="overflow-x-auto rounded-box border border-base-300 bg-base-100">
@@ -100,8 +100,8 @@
           <td><span class="panel"><span class="pill t-warn"><span class="c-ok">20%</span><span class="c-dim">⏱ 3h</span><span class="c-dim">·</span><span class="c-warn">W 70%</span></span></span></td>
           <td>Week projects to 98%: you make it, but only just</td></tr>
         <tr><td>6</td><td>Fable 100%, week 40%</td>
-          <td><span class="panel"><span class="pill t-hot"><span class="c-ok">12%</span><span class="c-dim">·</span><span class="c-hot">F 100%</span><span class="c-warn">⏰ Thu</span></span></span></td>
-          <td>Fable is blocked until its reset. Other models still work, which the menu says</td></tr>
+          <td><span class="panel"><span class="pill t-warn"><span class="c-ok">12%</span><span class="c-dim">·</span><span class="c-hot">F 100%</span><span class="c-ok">⏰ 3h</span></span></span></td>
+          <td>Fable is blocked until its reset, but other models still work: the icon goes amber at most and the timer stays on the session</td></tr>
         <tr><td>7</td><td>No session active</td>
           <td><span class="panel"><span class="pill t-ok"><span class="c-ok">0%</span></span></span></td>
           <td>No session timer to show, and nothing else threatens you</td></tr>
@@ -126,14 +126,14 @@
         <tr class="bg-warning/10"><td>11 ✱</td><td>Week 99%, resets in 2 h, session 0%</td><td>Pace ~99.9 → <b>amber</b></td><td><b>Red</b>: 1% of a week is a few minutes of work, so it blocks you if you start now</td><td><b>Almost gone</b>: ≤ 2% left with the reset more than 30 min away → red, whatever the pace</td></tr>
         <tr class="bg-warning/10"><td>12 ✱</td><td>Fable 100% but you're working in Opus</td><td>Pill <b>red</b> for days</td><td>Fable shown red, pill no worse than amber, because Opus still works</td><td><b>Model limits cap the pill at amber.</b> Their own label still goes red. The usage API doesn't say which model you're on (decision below)</td></tr>
         <tr class="bg-warning/10"><td>13 ✱</td><td>Laptop offline, last good data 2 h old</td><td>Old colour shown as if current</td><td>Grey, "as of 11:20"</td><td><b>Stale</b>: data older than 3 × the refresh interval → grey pill and timestamp; colour returns on the next fetch</td></tr>
-        <tr><td>14</td><td>Session 2 min in, already 20%</td><td>Elapsed floored to 30 min → pace 200 → red</td><td>Red: the true rate is 10%/min</td><td>none (floor already handles it)</td></tr>
+        <tr><td>14</td><td>Session 2 min in, already 20%</td><td>Elapsed floored to 30 min → pace 200 → red</td><td>Amber: the projected run-out is ~2 h away, and one big context load isn't a trend</td><td>Session red needs the run-out within 1 h; the last-30-min rate turns it red if the burst continues</td></tr>
         <tr><td>15</td><td>Session 2 min in, 1%</td><td>Floored → pace 10 → green</td><td>Green</td><td>none</td></tr>
         <tr><td>16</td><td>Week 5% in the first 6 h</td><td>Floored to 16.8 h → pace 50 → green</td><td>Green</td><td>none</td></tr>
         <tr><td>17</td><td>Session 100%, resets in 10 min</td><td>Red, ⏰ 10m (time until it is back)</td><td>Red with the reset time, so you know when you're back</td><td>none</td></tr>
         <tr><td>18</td><td>Session 70% used in hour 1, idle since, 4 h elapsed</td><td>Pace 87 → green</td><td>Green: recent rate is 0, so nothing is burning</td><td>none (the recent rate agrees)</td></tr>
         <tr><td>19</td><td>Week resets mid-session</td><td>Week drops to 0%; session unchanged</td><td>Same: independent windows</td><td>none</td></tr>
         <tr><td>20</td><td>Laptop wakes after the session reset passed</td><td>Old % with "0m"</td><td>0%, ↻, refetched immediately</td><td>Tick re-check (scenario 8)</td></tr>
-        <tr><td>21</td><td>Session 100% but extra usage (paid overflow) is on</td><td>Red</td><td>Red, with the menu saying "now on extra usage (billed)" so it reads as a cost, not a block</td><td>Menu text only</td></tr>
+        <tr><td>21</td><td>Session 100% but extra usage (paid overflow) is on</td><td>Red</td><td>Red, with the menu saying "now on extra usage (billed)" so it reads as a cost, not a block</td><td><b>Not built</b>: which field in the usage response marks extra usage hasn't been seen yet</td></tr>
         <tr><td>22</td><td>API returns 429 for an hour (back-off)</td><td>Stale numbers</td><td>Grey after 3 intervals (row 13)</td><td>Same as 13</td></tr>
       </tbody>
     </table>
@@ -170,7 +170,7 @@
   <div class="grid md:grid-cols-2 gap-4">
     <div class="card card-border bg-base-100"><div class="card-body p-5 text-sm space-y-1">
       <h3 class="font-bold">Leave and holidays</h3>
-      <p><b>Now:</b> a "Day off today" switch in the menu. It removes today's work hours from both elapsed and remaining, so a leave day neither inflates nor deflates the pace.</p>
+      <p>A "Day off today" switch was tried and removed: taking one day out of both elapsed and remaining time moved the weekly pace by only ~2 points.</p>
       <p><b>Later:</b> read leave and holidays automatically from the Pace app's DhiHRMS calendar (its <span class="mono">my-days</span> endpoint), once that exists.</p>
     </div></div>
     <div class="card card-border bg-base-100"><div class="card-body p-5 text-sm space-y-1">

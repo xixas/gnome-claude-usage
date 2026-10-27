@@ -3,7 +3,7 @@
 
 import GLib from 'gi://GLib';
 import System from 'system';
-import {summarise, workMs, scheduleOf, planLimits} from '../limits.js';
+import {summarise, workMs, scheduleOf, planLimits, labelMarkup} from '../limits.js';
 
 const MIN = 60e3, HOUR = 60 * MIN, DAY = 24 * HOUR;
 // Tue 27 Oct 2026, 1:26 PM IST
@@ -12,7 +12,7 @@ const NOW = GLib.DateTime.new_local(2026, 10, 27, 13, 26, 0).to_unix() * 1000;
 function settings(over = {}) {
     const v = {
         'pace-hours': 'work', 'work-days': ['mon', 'tue', 'wed', 'thu', 'fri'], 'work-start': 9, 'work-end': 19,
-        'day-off': '', 'amber-at': 95, 'model-colour': 'amber', 'number-mode': 'used',
+        'amber-at': 95, 'show-limits': 'auto', 'model-colour': 'amber', 'number-mode': 'used',
         'countdown-mode': 'always', 'time-style': 'remaining', ...over,
     };
     return {get_string: k => v[k], get_int: k => v[k], get_strv: k => v[k], get_boolean: k => v[k]};
@@ -110,7 +110,7 @@ test('7 no session active → green, no countdown', () => {
 test('8 session reset passed, not refetched → 0% ↻, stale', () => {
     const s = summarise({five_hour: lim(40, -2 * MIN)}, settings(), NOW);
     eq(s.text, '0% ↻', 'label');
-    eq(s.stale, true, 'stale');
+    eq(s.refetch, true, 'refetch');
     eq(s.cd, null, 'countdown');
 });
 
@@ -180,11 +180,6 @@ test('19 week reset passed mid-session → week 0%, session untouched', () => {
     eq(byKey(s, 'five_hour').used, 30, 'session used');
 });
 
-test('day off removes that day from working time', () => {
-    const tue = GLib.DateTime.new_local(2026, 10, 27, 0, 0, 0).to_unix() * 1000;
-    eq(workMs(tue, tue + DAY, scheduleOf(settings())) / HOUR, 10, 'normal Tuesday');
-    eq(workMs(tue, tue + DAY, scheduleOf(settings({'day-off': '2026-10-27'}))), 0, 'Tuesday off');
-});
 
 test('countdown-mode alert hides the session timer while green', () => {
     eq(summarise({five_hour: lim(11, HOUR)}, settings({'countdown-mode': 'alert'}), NOW).cd, null, 'cd');
@@ -210,13 +205,12 @@ test('planLimits reads model limits from the nested list', () => {
     eq(Object.keys(p).join(), 'five_hour,seven_day_fable', 'keys');
 });
 
-test('run-out skips the weekend and a day off', () => {
+test('run-out skips the weekend', () => {
     const sat = GLib.DateTime.new_local(2026, 10, 31, 12, 0, 0).to_unix() * 1000;
     const thuReset = GLib.DateTime.new_local(2026, 11, 5, 13, 30, 0).to_unix() * 1000;
     const data = {seven_day: {utilization: 40, resets_at: iso(thuReset)}};
     const when = o => GLib.DateTime.new_from_unix_local(Math.floor(byKey(summarise(data, settings(o), sat), 'seven_day').outMs / 1000)).format('%a %H:%M');
-    eq(when({}), 'Wed 12:15', 'normal week');
-    eq(when({'day-off': '2026-11-02'}), 'Thu 12:15', 'Monday off');
+    eq(when({}), 'Wed 12:15', 'skips the weekend');
 });
 
 // Week window Thu 22 Oct 13:30 → Mon 2 Nov 09:00 is not real; use a window that resets Monday 09:00
@@ -252,6 +246,83 @@ test('week 85% by Fri 18:00 (Thu reset): on Sunday the run-out is ~2.5 working h
     const sun = FRI_EVE + 42 * HOUR;
     const i = byKey(summarise({seven_day: {utilization: 85, resets_at: iso(thuReset)}}, settings(), sun), 'seven_day');
     eq(i.level, 2, 'level');
+});
+
+test('working day is 10 h, weekend 0', () => {
+    const tue = GLib.DateTime.new_local(2026, 10, 27, 0, 0, 0).to_unix() * 1000;
+    eq(workMs(tue, tue + DAY, scheduleOf(settings())) / HOUR, 10, 'Tuesday');
+    eq(workMs(tue + 4 * DAY, tue + 6 * DAY, scheduleOf(settings())), 0, 'Sat–Sun');
+});
+
+test('no drift between fetches: same data 6 min later keeps colour, run-out time and pace', () => {
+    const data = {five_hour: lim(20, 4 * HOUR + 2 * MIN)};
+    const a = byKey(summarise(data, settings(), NOW, [], new Set(), NOW), 'five_hour');
+    const b = byKey(summarise(data, settings(), NOW + 6 * MIN, [], new Set(), NOW), 'five_hour');
+    eq(b.level, a.level, 'level');
+    eq(b.outMs, a.outMs, 'run-out moment');
+    eq(Math.round(b.pace), Math.round(a.pace), 'pace');
+});
+
+test('weekend offWatch sets the verdict, so it matches the amber W 99% in the bar', () => {
+    const sat = FRI_EVE + 18 * HOUR;
+    const s = summarise({five_hour: lim(0, null, sat), seven_day: {utilization: 99, resets_at: iso(MON_9)}}, settings(), sat);
+    eq(s.top.key, 'seven_day', 'top');
+    eq(s.top.reason, 'off', 'reason');
+});
+
+test('two reds: countdown follows the one that stops you first', () => {
+    const s = summarise({five_hour: lim(85, 2 * HOUR), seven_day: lim(100, DAY)}, settings({'pace-hours': 'all'}), NOW);
+    eq(s.cd.kind, 'reset', 'week blocked now beats session out in 32 min');
+    eq(s.cd.ms - NOW, DAY, 'week reset');
+});
+
+test('model-colour red: used-up Fable takes the countdown', () => {
+    const s = summarise({five_hour: lim(12, 3 * HOUR), seven_day_fable: lim(100, 2 * DAY)},
+        settings({'pace-hours': 'all', 'model-colour': 'red'}), NOW);
+    eq(s.cd.ms - NOW, 2 * DAY, 'fable reset');
+    eq(s.cd.level, 2, 'red');
+});
+
+test('number-mode left shows what is left', () => {
+    eq(summarise({five_hour: lim(27, 3 * HOUR)}, settings({'number-mode': 'left'}), NOW).text, '73%', 'label');
+});
+
+test('show-limits always: week stays in the bar while green', () => {
+    eq(summarise({five_hour: lim(11, 3 * MIN), seven_day: lim(64, WEEK_RESET)},
+        settings({'pace-hours': 'all', 'show-limits': 'always'}), NOW).text, '11% · W 64%', 'label');
+});
+
+test('recent rate ignores samples from before a session reset', () => {
+    const history = [{t: NOW - 25 * MIN, used: 90}, {t: NOW - 20 * MIN, used: 2}, {t: NOW - 5 * MIN, used: 4}];
+    eq(byKey(summarise({five_hour: lim(5, 4 * HOUR + 30 * MIN)}, settings(), NOW, history), 'five_hour').recent, false, 'no fake burst');
+});
+
+test('all hours: weekly red needs the run-out within 24 h', () => {
+    // week 80% with 2 days left (calendar): pace 112, out in ~1.5 days → amber; 90% → red
+    eq(byKey(summarise({seven_day: lim(80, 2 * DAY)}, settings({'pace-hours': 'all'}), NOW), 'seven_day').level, 1, '80%');
+    eq(byKey(summarise({seven_day: lim(90, 2 * DAY)}, settings({'pace-hours': 'all'}), NOW), 'seven_day').level, 2, '90%');
+});
+
+test('label markup escapes text', () => {
+    eq(labelMarkup([{text: 'a<b&', level: 0}], false), 'a&lt;b&amp;', 'escaped');
+});
+
+test('projected run-out passed since the fetch → "lapsed", red, refetch, countdown not in the past', () => {
+    // 95% fetched at NOW, 10 min later the projected run-out (~7 min after the fetch) has passed
+    const data = {five_hour: lim(95, 2 * HOUR)};
+    const s = summarise(data, settings(), NOW + 10 * MIN, [], new Set(), NOW);
+    const i = byKey(s, 'five_hour');
+    eq(i.reason, 'lapsed', 'reason');
+    eq(i.level, 2, 'level');
+    eq(s.refetch, true, 'refetch');
+    eq(s.cd.kind, 'reset', 'countdown shows the reset, not a past run-out');
+});
+
+test('asOf later than now is clamped to now', () => {
+    const data = {five_hour: lim(20, 4 * HOUR + 2 * MIN)};
+    const a = byKey(summarise(data, settings(), NOW, [], new Set(), NOW), 'five_hour');
+    const b = byKey(summarise(data, settings(), NOW, [], new Set(), NOW + HOUR), 'five_hour');
+    eq(Math.round(b.pace), Math.round(a.pace), 'pace');
 });
 
 print(failed ? `\n${failed} failed` : '\nall passed');

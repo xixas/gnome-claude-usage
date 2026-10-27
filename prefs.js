@@ -58,18 +58,24 @@ export default class ClaudeUsagePrefs extends ExtensionPreferences {
         };
         const page = new Adw.PreferencesPage();
         window.add(page);
-        window.set_default_size(560, 820);
+        window.set_default_size(640, 860);
 
         page.add(this._previewGroup(settings, lastUsage, window));
 
         const pace = new Adw.PreferencesGroup({
             title: 'Pace',
-            description: 'The session always shows. Week and model limits join it in the bar only when amber or red.',
         });
         page.add(pace);
-        pace.add(choiceRow(settings, 'pace-hours', 'Weekly pace counts',
-            'Working hours: nights, weekends and days off don\'t dilute your rate',
-            [['work', 'Working hours'], ['all', 'All hours']]));
+        pace.add(choiceRow(settings, 'show-limits', 'Week and model limits in the bar',
+            'The session always shows', [['auto', 'When amber or red'], ['always', 'Always']]));
+        const hours = choiceRow(settings, 'pace-hours', 'Weekly pace counts', '',
+            [['work', 'Working hours'], ['all', 'All hours']]);
+        const hoursHelp = () => (hours.subtitle = settings.get_string('pace-hours') === 'work'
+            ? 'Only your working days and hours count, so nights and weekends don\'t dilute your rate'
+            : 'Every hour of the week counts, nights and weekends included');
+        hoursHelp();
+        hours.connect('notify::selected', hoursHelp);
+        pace.add(hours);
         const days = new Adw.ExpanderRow({title: 'Working days'});
         for (const [day, name] of [['mon', 'Monday'], ['tue', 'Tuesday'], ['wed', 'Wednesday'], ['thu', 'Thursday'],
             ['fri', 'Friday'], ['sat', 'Saturday'], ['sun', 'Sunday']]) {
@@ -135,7 +141,9 @@ export default class ClaudeUsagePrefs extends ExtensionPreferences {
         const redraw = () => {
             const real = lastUsage();
             group.description = real ? 'Your latest numbers, with these settings' : 'Sample numbers — yours appear after the first update';
-            const {top, parts, text, cd} = summarise(real ?? sampleUsage(), settings);
+            // As of the panel's last fetch, so the preview matches the panel instead of drifting
+            const {top, parts, text, cd} = summarise(real ?? sampleUsage(), settings, Date.now(), [], new Set(),
+                real?._at ?? Date.now());
             label.set_markup(labelMarkup(parts, settings.get_boolean('color-enabled')));
             label.visible = text !== '';
             cdIcon.visible = cdLabel.visible = cd !== null;

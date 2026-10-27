@@ -7,16 +7,16 @@ A small GNOME Shell extension that shows your Claude plan limits (session, week,
 
 ## What it shows
 
-- **Top bar:** Claude icon + the session % first, always. The week and model limits (`W 66%`, `F 100%`) join it only when they're amber or red, each in its own colour.
+- **Top bar:** Claude icon + the session % first, always. The week and model limits (`W 66%`, `F 100%`) join it only when they're amber or red (or always, if you choose that in Settings), each in its own colour.
 - **Colour** answers "will this stop me before it resets?": green = fine, amber = you'll end the window at ≥ 95% or a weekly run-out is coming, red = used up, ≤ 2% left, or it runs out before the reset soon — within 1 h for the session, 1 working day for weekly limits — or at ≥ 90% used. Once red it stays red a little longer, so it doesn't flicker. A weekly limit with no working hours left before its reset is green (shown in amber text if ≥ 90%, in case you work the weekend). A used-up model limit (Fable) turns the icon amber at most, since the API doesn't say which model you're on.
 - **Countdown:** ⏰ the session reset, or the reset of the red limit that stops you first; ⌛ when a limit will run out first. Coloured by the limit it counts down for. Time left or clock time.
-- **Menu:** a one-line verdict naming the limit that sets the colour, every limit with a bar, reset time and pace, and a **Day off today** switch.
-- **Settings:** live preview, working days and hours for weekly pace, the amber threshold, how far a model limit may colour the icon, used/left, countdown, refresh interval.
+- **Menu:** a one-line verdict naming the limit that sets the colour, every limit with a bar, reset time and pace.
+- **Settings:** live preview, week and model limits in the bar (when amber or red, or always), working days and hours for weekly pace, the amber threshold, how far a model limit may colour the icon, used/left, countdown, refresh interval.
 - **Stays current:** re-judged every minute; a window that rolled over shows `0% ↻` and refetches; numbers older than 3 refresh intervals turn grey.
 - **Problems shown clearly:** no internet, can't reach Anthropic, sign-in needed (with a **Sign in…** action), service errors. Each gets its own theme icon, and your last numbers stay visible in grey. Retries as soon as you're back online; backs off when Anthropic says "too many requests" (HTTP 429).
 - **Fresh when you look:** opening the menu refreshes if the numbers are over a minute old.
 
-Pace = projected % at reset = `used% × window ÷ elapsed`. The session counts real time (5 h), and also projects from your rate over the last 30 minutes so a burst after idling isn't averaged away. Weekly limits count only your **working hours** (default Mon–Fri 9 AM–7 PM, or all hours), so nights, weekends and days off don't dilute the rate. Elapsed is floored at 10% of the window. It's an estimate; the claude.ai "On track" line may use a different method. Scenarios: [`docs/priority-logic.html`](docs/priority-logic.html); tests: `TZ=Asia/Kolkata gjs -m tests/limits.test.js`.
+Pace = projected % at reset = `used% × window ÷ elapsed`. The session counts real time (5 h), and also projects from your rate over the last 30 minutes so a burst after idling isn't averaged away. Weekly limits count only your **working hours** (default Mon–Fri 9 AM–7 PM, or all hours), so nights and weekends don't dilute the rate. Elapsed is floored at 10% of the window. It's an estimate; the claude.ai "On track" line may use a different method. Scenarios: [`docs/priority-logic.html`](docs/priority-logic.html); tests: `TZ=Asia/Kolkata gjs -m tests/limits.test.js`.
 
 Design mockup: [`docs/mockup.html`](docs/mockup.html).
 
