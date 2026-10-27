@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Usage priority logic</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/daisyui@5.5.19/daisyui.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/daisyui@5.5.19/themes.css">
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.2.4/dist/index.global.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  :where(.grid, .flex) > * { min-width: 0; }
+  :where(p, li, td, th) { overflow-wrap: anywhere; }
+  body { background: #f6f5f2; color: #1f2328; }
+  .mono { font-family: ui-monospace, monospace; }
+  .panel { background: #000; color: #fff; border-radius: 10px; padding: 6px 12px; display: inline-flex; gap: 10px; align-items: center; font: 600 14px Cantarell, Inter, system-ui, sans-serif; }
+  .pill { padding: 3px 12px; border-radius: 99px; display: inline-flex; gap: 8px; align-items: center; }
+  .t-ok { background: #2ea04333; } .t-warn { background: #d4a72c40; } .t-hot { background: #e5534b40; }
+  .c-ok { color: #7ee787; } .c-warn { color: #f2cc60; } .c-hot { color: #ff7b72; } .c-dim { color: #ffffffb0; }
+</style>
+<script type="application/json" data-lavish-revisions>
+[{ "id": "r1", "label": "Round 1", "timestamp": "2026-10-27T08:30:00Z", "summary": "14 stress scenarios; 5 rule fixes" },
+ { "id": "r2", "label": "Round 2", "timestamp": "2026-10-27T08:50:00Z", "summary": "Weekly pace over working hours; leave toggle" }]
+</script>
+</head>
+<body>
+<main class="mx-auto max-w-5xl p-4 lg:p-8 space-y-12">
+
+<section class="space-y-3">
+  <div class="flex gap-2 items-center"><span class="badge badge-soft badge-primary">claude-usage@vikas</span><span class="badge badge-soft">plan · reviewed by Fable</span></div>
+  <h1 class="text-3xl font-bold">Colour by "will this stop me before it resets?"</h1>
+  <p class="max-w-3xl text-lg">Every limit gets one question: at my current rate, do I hit 100% before it resets? The session always comes first. Another limit appears on the panel only when it actually threatens you, and the panel colour comes from the worst limit, judged by that question rather than by raw %.</p>
+</section>
+
+<section class="space-y-3">
+  <h2 class="text-2xl font-bold">What's wrong today</h2>
+  <div class="overflow-x-auto rounded-box border border-base-300 bg-base-100">
+    <table class="table table-sm">
+      <thead><tr><th>Problem</th><th>Where</th><th>Effect you saw</th></tr></thead>
+      <tbody>
+        <tr><td>Colour uses raw % (amber ≥ 50, red ≥ 80) and ignores how much time is left</td><td class="mono">limits.js:110-112</td><td>Week 64% with 2 days left showed amber, yet you finish the week around 90%</td></tr>
+        <tr><td>Pill tint and countdown both come from the worst limit, with no label saying which</td><td class="mono">limits.js:129, :140-145</td><td>Yellow at session 11%, and the timer showed the <i>week</i> reset (2d1h)</td></tr>
+        <tr><td>Panel order is fixed by settings, with no labels for 2 limits</td><td class="mono">limits.js:131-136</td><td>"7% · 64%", with no way to tell which number is which</td></tr>
+        <tr><td>When a reset time passes, the old % stays. The 60 s tick only redraws the timer text</td><td class="mono">extension.js:135-138</td><td>"0m" next to a stale %, until the next fetch (up to an hour on back-off)</td></tr>
+        <tr><td>The first 10% of a window falls back to the raw-% rule</td><td class="mono">limits.js:93, :105</td><td>Colour means something different in the first 30 min of a session and the first 17 h of a week</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="text-sm opacity-70">Correct already: the pace maths (<span class="mono">used × window ÷ elapsed</span>), the run-out time, rounding and time zones (<span class="mono">limits.js:95,99</span>).</p>
+</section>
+
+<section class="space-y-3">
+  <h2 class="text-2xl font-bold">The new rule</h2>
+  <div class="grid md:grid-cols-3 gap-4">
+    <div class="card card-border bg-base-100"><div class="card-body p-5 text-sm">
+      <div class="badge badge-error">RED: it will stop you</div>
+      <p>The limit is at 100% <b>or</b> at the current rate it runs out <b>before</b> it resets. The panel shows when you'll hit it.</p>
+    </div></div>
+    <div class="card card-border bg-base-100"><div class="card-body p-5 text-sm">
+      <div class="badge badge-warning">AMBER: cutting it close</div>
+      <p>At the current rate you'd finish the window at <b>95–100%</b>. You'll make it, but with little margin.</p>
+    </div></div>
+    <div class="card card-border bg-base-100"><div class="card-body p-5 text-sm">
+      <div class="badge badge-success">GREEN: fine</div>
+      <p>The projected total at reset is below 95%, whatever the raw % says. A week at 64% that ends around 90% is green.</p>
+    </div></div>
+  </div>
+  <ul class="list-disc ml-5 text-sm space-y-1 max-w-3xl">
+    <li><b>Same rule for every limit</b>: session, week, and model-specific weeks like Fable. The windows are independent, so a week reset never touches the session and vice versa.</li>
+    <li><b>Early in a window</b> elapsed time is floored at 10% of the window, so the projection is cautious rather than missing. A burst of 20% in the first 5 minutes of a session counts as running at a 200% pace, and shows red.</li>
+    <li><b>Reset passed?</b> The 60 s tick re-checks. A limit whose reset time has gone by is treated as 0%, marked "just reset", and a refresh fires straight away.</li>
+    <li><b>The "warn at 50 / hot at 80 / colour by" settings go away</b>, replaced by one setting: "amber when projected ≥ 95%".</li>
+  </ul>
+</section>
+
+<section class="space-y-3">
+  <h2 class="text-2xl font-bold">What the panel shows</h2>
+  <ul class="list-disc ml-5 text-sm space-y-1 max-w-3xl">
+    <li><b>Session % first, always</b>, followed by the session reset time whenever a session is active.</li>
+    <li>Week or Fable appears only when it is <b>amber or red</b>, with a letter label and its own colour.</li>
+    <li>Pill tint is the worst colour. If a non-session limit is red, its time (hourglass) replaces the session timer, because that's the one that blocks you.</li>
+  </ul>
+  <div class="overflow-x-auto rounded-box border border-base-300 bg-base-100">
+    <table class="table table-sm">
+      <thead><tr><th>#</th><th>Situation</th><th>Panel</th><th>Why</th></tr></thead>
+      <tbody>
+        <tr><td>1</td><td>Today: session 11% with 3 min left; week 64% with 2 days left</td>
+          <td><span class="panel"><span class="pill t-ok"><span class="c-ok">11%</span><span class="c-dim">⏱ 3m</span></span></span></td>
+          <td>Week projects to about 90%, so it's green and hidden</td></tr>
+        <tr><td>2</td><td>Session 0%, week 99% with 1 day left</td>
+          <td><span class="panel"><span class="pill t-hot"><span class="c-ok">0%</span><span class="c-dim">·</span><span class="c-hot">W 99%</span><span class="c-hot">⏰ 1d</span></span></span></td>
+          <td>Week projects to 116%, which stops you before Thu, so it's red and the week's time is shown</td></tr>
+        <tr><td>3</td><td>Session 85% after 3 h</td>
+          <td><span class="panel"><span class="pill t-hot"><span class="c-hot">85%</span><span class="c-hot">⌛ 32m</span></span></span></td>
+          <td>Projects to 142%, running out in 32 min, before the reset in 2 h</td></tr>
+        <tr><td>4</td><td>Session 60% after 4 h</td>
+          <td><span class="panel"><span class="pill t-ok"><span class="c-ok">60%</span><span class="c-dim">⏱ 1h</span></span></span></td>
+          <td>Projects to 75%: high raw %, but fine</td></tr>
+        <tr><td>5</td><td>Week 70% with 2 days left, session 20%</td>
+          <td><span class="panel"><span class="pill t-warn"><span class="c-ok">20%</span><span class="c-dim">⏱ 3h</span><span class="c-dim">·</span><span class="c-warn">W 70%</span></span></span></td>
+          <td>Week projects to 98%: you make it, but only just</td></tr>
+        <tr><td>6</td><td>Fable 100%, week 40%</td>
+          <td><span class="panel"><span class="pill t-hot"><span class="c-ok">12%</span><span class="c-dim">·</span><span class="c-hot">F 100%</span><span class="c-warn">⏰ Thu</span></span></span></td>
+          <td>Fable is blocked until its reset. Other models still work, which the menu says</td></tr>
+        <tr><td>7</td><td>No session active</td>
+          <td><span class="panel"><span class="pill t-ok"><span class="c-ok">0%</span></span></span></td>
+          <td>No session timer to show, and nothing else threatens you</td></tr>
+        <tr><td>8</td><td>Session reset passed 2 min ago, not yet refetched</td>
+          <td><span class="panel"><span class="pill t-ok"><span class="c-ok">0%</span><span class="c-dim">↻</span></span></span></td>
+          <td>Treated as reset, and a refresh fires now</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="text-sm opacity-70">The menu keeps all rows, ordered session → week → models. Its verdict line names the limit that drives the colour, e.g. "Week will run out Wed 6 PM, a day before it resets".</p>
+</section>
+
+<section class="space-y-3" data-lavish-revision="r1">
+  <h2 class="text-2xl font-bold">Stress-testing the rule: 14 more scenarios</h2>
+  <p class="max-w-3xl">The plain "average pace" rule breaks in five places. Each break gets one fix, and every row becomes a unit test. <b>Rows marked ✱ changed the rule.</b></p>
+  <div class="overflow-x-auto rounded-box border border-base-300 bg-base-100">
+    <table class="table table-sm">
+      <thead><tr><th>#</th><th>Scenario</th><th>Plain average pace says</th><th>Should be</th><th>Fix</th></tr></thead>
+      <tbody>
+        <tr class="bg-warning/10"><td>9 ✱</td><td>Session: 3½ h idle, then a burst of 50% in the last 30 min. Reset in 1 h</td><td>4 h elapsed, 50% → pace 62 → <b>green</b></td><td><b>Red</b>: at 100%/h you're out in 30 min, before the reset</td><td><b>Recent rate</b>: for the session, also project from the rate over the last 30 min of polls. Red if either projection runs out before the reset</td></tr>
+        <tr class="bg-warning/10"><td>10 ✱</td><td>Week window starts Thu. Heavy Thu–Fri, 40% after 1.5 days; you never work weekends</td><td>Pace 187, out Sunday → <b>red</b> all weekend</td><td><b>Amber</b>: heading for trouble, not blocked yet</td><td><b>Weekly red needs urgency</b>: run-out within 24 h, or ≥ 90% used. Otherwise a projected run-out is amber</td></tr>
+        <tr class="bg-warning/10"><td>11 ✱</td><td>Week 99%, resets in 2 h, session 0%</td><td>Pace ~99.9 → <b>amber</b></td><td><b>Red</b>: 1% of a week is a few minutes of work, so it blocks you if you start now</td><td><b>Almost gone</b>: ≤ 2% left with the reset more than 30 min away → red, whatever the pace</td></tr>
+        <tr class="bg-warning/10"><td>12 ✱</td><td>Fable 100% but you're working in Opus</td><td>Pill <b>red</b> for days</td><td>Fable shown red, pill no worse than amber, because Opus still works</td><td><b>Model limits cap the pill at amber.</b> Their own label still goes red. The usage API doesn't say which model you're on (decision below)</td></tr>
+        <tr class="bg-warning/10"><td>13 ✱</td><td>Laptop offline, last good data 2 h old</td><td>Old colour shown as if current</td><td>Grey, "as of 11:20"</td><td><b>Stale</b>: data older than 3 × the refresh interval → grey pill and timestamp; colour returns on the next fetch</td></tr>
+        <tr><td>14</td><td>Session 2 min in, already 20%</td><td>Elapsed floored to 30 min → pace 200 → red</td><td>Red: the true rate is 10%/min</td><td>none (floor already handles it)</td></tr>
+        <tr><td>15</td><td>Session 2 min in, 1%</td><td>Floored → pace 10 → green</td><td>Green</td><td>none</td></tr>
+        <tr><td>16</td><td>Week 5% in the first 6 h</td><td>Floored to 16.8 h → pace 50 → green</td><td>Green</td><td>none</td></tr>
+        <tr><td>17</td><td>Session 100%, resets in 10 min</td><td>Red, ⏰ 10m (time until it is back)</td><td>Red with the reset time, so you know when you're back</td><td>none</td></tr>
+        <tr><td>18</td><td>Session 70% used in hour 1, idle since, 4 h elapsed</td><td>Pace 87 → green</td><td>Green: recent rate is 0, so nothing is burning</td><td>none (the recent rate agrees)</td></tr>
+        <tr><td>19</td><td>Week resets mid-session</td><td>Week drops to 0%; session unchanged</td><td>Same: independent windows</td><td>none</td></tr>
+        <tr><td>20</td><td>Laptop wakes after the session reset passed</td><td>Old % with "0m"</td><td>0%, ↻, refetched immediately</td><td>Tick re-check (scenario 8)</td></tr>
+        <tr><td>21</td><td>Session 100% but extra usage (paid overflow) is on</td><td>Red</td><td>Red, with the menu saying "now on extra usage (billed)" so it reads as a cost, not a block</td><td>Menu text only</td></tr>
+        <tr><td>22</td><td>API returns 429 for an hour (back-off)</td><td>Stale numbers</td><td>Grey after 3 intervals (row 13)</td><td>Same as 13</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="card card-border bg-base-100"><div class="card-body p-5 text-sm space-y-1">
+    <h3 class="font-bold">Rule after stress-testing</h3>
+    <p><b>RED</b> when the limit is at 100%; <b>or</b> ≤ 2% is left with the reset more than 30 min away; <b>or</b> for the session, the average <i>or</i> last-30-min rate runs out before the reset; <b>or</b> for a weekly limit, it runs out before the reset <i>and</i> (within 24 h <i>or</i> ≥ 90% used).</p>
+    <p><b>AMBER</b> when it projects to finish at ≥ 95%, or a weekly run-out isn't urgent yet.</p>
+    <p><b>GREEN</b> otherwise. <b>GREY</b> when the data is stale. Model-specific limits tint the pill at most amber.</p>
+  </div></div>
+  <div class="alert alert-soft alert-info text-sm"><span><b>One decision (row 12):</b> I recommend capping model limits at amber on the pill. The other option is full red, which is right only if you use Fable most of the time. That's the recommendation I'd defend least: if Fable is your daily driver, say "Fable red" and I'll make it a setting.</span></div>
+</section>
+
+<section class="space-y-3" data-lavish-revision="r2">
+  <h2 class="text-2xl font-bold">How pace is calculated: calendar time vs your working time</h2>
+  <p class="max-w-3xl"><b>Today pace counts every hour of the week</b>, nights and weekends included: <span class="mono">pace = used × window ÷ elapsed</span>. You work Mon–Fri, so the hours you never use dilute the rate and the week looks safer than it is. The fix is to count only <b>your working hours</b> for weekly limits.</p>
+  <div class="card card-border bg-base-100"><div class="card-body p-5 text-sm space-y-2">
+    <p class="mono">weekly pace = used × work_hours_in_window ÷ work_hours_elapsed</p>
+    <p class="mono">run-out = now + (100 − used) ÷ (used ÷ work_hours_elapsed), counted forward over work hours only, then shown as a clock time</p>
+    <p class="opacity-70">Work hours come from a schedule setting, default Mon–Fri 09:00–19:00. Use outside those hours still counts toward <i>used</i>; it just doesn't stretch the clock. The 5-hour session keeps calendar time, because a session only runs while you're working anyway. Elapsed is still floored at 10% of the window's work hours.</p>
+  </div></div>
+  <div class="overflow-x-auto rounded-box border border-base-300 bg-base-100">
+    <table class="table table-sm">
+      <thead><tr><th>Your week right now (Tue 1:26 PM, 64%, resets Thu 1:30 PM)</th><th>Calendar time (today)</th><th>Working time (proposed)</th></tr></thead>
+      <tbody>
+        <tr><td>Hours in the window</td><td>168 h</td><td>50 h (Thu pm 5.5 + Fri, Mon, Tue, Wed 10 each + Thu am 4.5)</td></tr>
+        <tr><td>Elapsed</td><td>119.9 h</td><td>29.9 h</td></tr>
+        <tr><td>Projected at reset</td><td>90% → <span class="badge badge-success badge-sm">green</span></td><td>107% → runs out <b>Thu ~10:15 AM</b>, 3 h before the reset → <span class="badge badge-warning badge-sm">amber</span></td></tr>
+        <tr><td>Weekend after a heavy Thu–Fri (scenario 10)</td><td>Pace climbs all weekend as hours pass with no work</td><td>Pace freezes Sat–Sun: no work hours elapse, so no false alarm</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="text-sm max-w-3xl">On the calendar view your week looks green. On your actual working days it's heading for the limit around Thursday morning. <b>That's the pace you asked for.</b></p>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="card card-border bg-base-100"><div class="card-body p-5 text-sm space-y-1">
+      <h3 class="font-bold">Leave and holidays</h3>
+      <p><b>Now:</b> a "Day off today" switch in the menu. It removes today's work hours from both elapsed and remaining, so a leave day neither inflates nor deflates the pace.</p>
+      <p><b>Later:</b> read leave and holidays automatically from the Pace app's DhiHRMS calendar (its <span class="mono">my-days</span> endpoint), once that exists.</p>
+    </div></div>
+    <div class="card card-border bg-base-100"><div class="card-body p-5 text-sm space-y-1">
+      <h3 class="font-bold">If you do work late or on weekends</h3>
+      <p>That usage is never lost: it adds to <i>used</i>, which only makes the projection more cautious. If it becomes routine, widen the schedule in Settings (e.g. Mon–Sat, 09–23). There's also a "Calendar time" option for people with no fixed schedule.</p>
+    </div></div>
+  </div>
+</section>
+
+<section class="space-y-3">
+  <h2 class="text-2xl font-bold">Build and done-when</h2>
+  <div class="overflow-x-auto rounded-box border border-base-300 bg-base-100">
+    <table class="table table-sm">
+      <thead><tr><th>Change</th><th>Files</th></tr></thead>
+      <tbody>
+        <tr><td>New <span class="mono">levelOf</span> (pace-only, floored elapsed), stale-reset handling, panel text and countdown selection</td><td class="mono">limits.js</td></tr>
+        <tr><td>60 s tick re-summarises and triggers a refresh when a reset has passed</td><td class="mono">extension.js</td></tr>
+        <tr><td>Replace warn-at / hot-at / colour-by with <span class="mono">amber-at-pace</span> (default 95)</td><td class="mono">schemas/*.gschema.xml, prefs.js</td></tr>
+        <tr><td>Unit tests for the 8 scenarios above. limits.js has no shell imports, so they run under <span class="mono">gjs</span></td><td class="mono">tests/limits.test.js (new)</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="text-sm"><b>Done when:</b> all 22 scenarios pass as tests (the recent rate needs a small in-memory ring of the last ~6 polls in <span class="mono">extension.js</span>), and the live panel on your machine shows <span class="mono">11%</span>-style session-first text, green today, with the session timer.</p>
+</section>
+
+</main>
+</body>
+</html>

@@ -6,7 +6,7 @@ import Gtk from 'gi://Gtk';
 
 import {ExtensionPreferences} from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 
-import {LEVELS, nameFor, subtitleFor, planLimitKeys, summarise, countdownText} from './limits.js';
+import {LEVELS, summarise, countdownText, labelMarkup} from './limits.js';
 
 // Same colours as stylesheet.css, for the GTK preview
 const PREVIEW_CSS = `
@@ -62,43 +62,43 @@ export default class ClaudeUsagePrefs extends ExtensionPreferences {
 
         page.add(this._previewGroup(settings, lastUsage, window));
 
-        const known = planLimitKeys(lastUsage());
-        const bar = new Adw.PreferencesGroup({
-            title: 'Show in top bar',
-            description: 'Every limit is always listed in the menu; these pick what sits in the bar.' +
-                (known.length ? '' : '\nModel limits (e.g. Fable) appear here after the first successful update.'),
+        const pace = new Adw.PreferencesGroup({
+            title: 'Pace',
+            description: 'The session always shows. Week and model limits join it in the bar only when amber or red.',
         });
-        page.add(bar);
-        for (const key of known.length ? known : ['five_hour', 'seven_day']) {
-            const row = new Adw.SwitchRow({
-                title: nameFor(key),
-                subtitle: subtitleFor(key),
-                active: settings.get_strv('bar-limits').includes(key),
-            });
+        page.add(pace);
+        pace.add(choiceRow(settings, 'pace-hours', 'Weekly pace counts',
+            'Working hours: nights, weekends and days off don\'t dilute your rate',
+            [['work', 'Working hours'], ['all', 'All hours']]));
+        const days = new Adw.ExpanderRow({title: 'Working days'});
+        for (const [day, name] of [['mon', 'Monday'], ['tue', 'Tuesday'], ['wed', 'Wednesday'], ['thu', 'Thursday'],
+            ['fri', 'Friday'], ['sat', 'Saturday'], ['sun', 'Sunday']]) {
+            const row = new Adw.SwitchRow({title: name, active: settings.get_strv('work-days').includes(day)});
             row.connect('notify::active', () => {
-                const keys = settings.get_strv('bar-limits').filter(k => k !== key);
-                settings.set_strv('bar-limits', row.active ? [...keys, key] : keys);
+                const rest = settings.get_strv('work-days').filter(d => d !== day);
+                settings.set_strv('work-days', row.active ? [...rest, day] : rest);
             });
-            bar.add(row);
+            days.add_row(row);
         }
-        bar.add(switchRow(settings, 'short-labels', 'Short labels',
-            'S = Session, W = Week, F = Fable… before each number. Always on when 3+ are shown'));
+        pace.add(days);
+        pace.add(spinRow(settings, 'work-start', 'Work starts (hour)', '9 = 9 AM', 0, 23));
+        pace.add(spinRow(settings, 'work-end', 'Work ends (hour)', '19 = 7 PM', 1, 24));
+        pace.add(spinRow(settings, 'amber-at', 'Amber from (projected %)',
+            'Amber when a limit is on course to end its window at or above this', 50, 100));
+        pace.add(choiceRow(settings, 'model-colour', 'Used-up model limit (e.g. Fable)',
+            'The usage data doesn\'t say which model you\'re using, so by default it only turns the bar amber',
+            [['amber', 'Amber'], ['red', 'Red']]));
 
         const display = new Adw.PreferencesGroup({title: 'Display'});
         page.add(display);
         display.add(choiceRow(settings, 'number-mode', 'Numbers show', 'Used: 9% · Left: 91%',
             [['used', 'Used'], ['left', 'Left']]));
-        display.add(choiceRow(settings, 'color-by', 'Colour by',
-            "Pace = where you'll be at reset · Usage = % used now",
-            [['pace', 'Pace'], ['usage', 'Usage']]));
         display.add(switchRow(settings, 'color-enabled', 'Colour coding',
             'Off = plain panel colour, like other icons'));
-        display.add(spinRow(settings, 'warn-at', 'Amber from (%)', 'Used when colouring by usage', 1, 100));
-        display.add(spinRow(settings, 'hot-at', 'Red from (%)', 'Used when colouring by usage', 1, 100));
 
         const countdown = new Adw.PreferencesGroup({title: 'Countdown'});
         page.add(countdown);
-        countdown.add(choiceRow(settings, 'countdown-mode', 'Show countdown', 'For the limit that set the colour',
+        countdown.add(choiceRow(settings, 'countdown-mode', 'Show countdown', 'The session reset, or the red limit that stops you first',
             [['never', 'Never'], ['alert', 'When amber or red'], ['always', 'Always']]));
         countdown.add(choiceRow(settings, 'time-style', 'Show as',
             'Time left: 1h50m · Clock: 12:30 PM',
@@ -135,8 +135,8 @@ export default class ClaudeUsagePrefs extends ExtensionPreferences {
         const redraw = () => {
             const real = lastUsage();
             group.description = real ? 'Your latest numbers, with these settings' : 'Sample numbers — yours appear after the first update';
-            const {top, text, cd} = summarise(real ?? sampleUsage(), settings);
-            label.label = text;
+            const {top, parts, text, cd} = summarise(real ?? sampleUsage(), settings);
+            label.set_markup(labelMarkup(parts, settings.get_boolean('color-enabled')));
             label.visible = text !== '';
             cdIcon.visible = cdLabel.visible = cd !== null;
             if (cd) {
@@ -145,8 +145,8 @@ export default class ClaudeUsagePrefs extends ExtensionPreferences {
             }
             for (const w of [icon, label, cdIcon, cdLabel]) {
                 LEVELS.forEach(c => w.remove_css_class(c));
-                if (top && settings.get_boolean('color-enabled'))
-                    w.add_css_class(LEVELS[top.level]);
+                if (top && settings.get_boolean('color-enabled') && w !== label)
+                    w.add_css_class(LEVELS[w === icon ? top.pillLevel : cd?.level ?? 0]);
             }
         };
         redraw();

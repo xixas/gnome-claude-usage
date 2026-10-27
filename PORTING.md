@@ -47,22 +47,28 @@ Example response (shape only; extra fields vary):
 
 ```
 window   = 5 h for five_hour, 7 d for every seven_day*
-elapsed  = window − (resets_at − now)
-pace     = used × window / elapsed            (null if elapsed < 10% of window)
-runs out = now + (100 − used) × elapsed / used   (only when pace ≥ 100; "now" if used ≥ 100)
+span(a,b)= b − a for the session; for weekly limits only the working hours between a and b
+           (settings: pace-hours = work | all, work-days, work-start, work-end, day-off)
+total    = span(resets_at − window, resets_at)
+elapsed  = max(span(resets_at − window, now), 10% of total)
+pace     = used × total / elapsed
+runs out = now + (100 − used) × elapsed / used, counted forward over span; kept only if before resets_at
+session  : also from the rate over the last 30 min of fetched samples (≥ 10 min of history, reset drops ignored);
+           the earlier run-out wins
+reset passed (resets_at ≤ now) → the limit counts as 0%, "↻", and is refetched once
 ```
 
-**Level** per limit — colour by pace (default), when pace is known:
-green `pace < 90`, amber `90 ≤ pace < 100`, red `runs out before reset`.
-Otherwise colour by usage: amber from `warn-at` (50), red from `hot-at` (80).
+**Level** per limit: red = used ≥ 100, or ≤ 2% left with the reset > 30 min away, or it runs out before the reset (weekly limits: only if that's within 24 h or used ≥ 90; otherwise amber); amber = pace ≥ `amber-at` (95); else green. Model-scoped limits (Fable…) colour the icon at most amber unless `model-colour` = red.
 
-**Top limit** = highest level, then highest pace (or used). It sets the bar colour, countdown and verdict.
+**Top limit** = highest icon level; among reds, the one that stops you first; then session → week → models. It sets the icon colour and the verdict.
 
-**Bar text:** chosen limits as `9% · 41%` (or `100 − x` in "left" mode); short labels when on, or when 3+ are shown.
+**Bar text:** the session `9%` always, plus `W 64%` / `F 100%` for any other limit that's amber or red, each in its own colour (`100 − x` in "left" mode).
 
-**Countdown** (default: only when amber/red): red with a run-out time → hourglass + time until run-out; otherwise alarm + time until the top limit resets. Format `1h50m` / `1d2h`, or clock time (`12:30 PM`, `Thu 1:30 PM`).
+**Countdown** (default: always): the red limit that stops you first, else the session. Runs out first → hourglass + time until run-out; otherwise alarm + time until its reset. Coloured by that limit. Format `1h50m` / `1d2h`, or clock time (`12:30 PM`, `Thu 1:30 PM`).
 
-**Verdict** (menu): Limit reached / Running out / Cutting it close / On track; or Plenty left / Getting busy / Running low when colouring by usage.
+**Verdict** (menu): Limit reached / Almost used up / Running out / Heading for the limit / Cutting it close / Just reset / On track.
+
+**Stale:** numbers older than 3 × the refresh interval turn grey, with the time they're from.
 
 **Colours:** green `#8ff0a4`, amber `#f6d32d`, red `#ff7b63`, grey `#9a9996`.
 

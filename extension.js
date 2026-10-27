@@ -15,7 +15,8 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
-import {LEVELS, nameFor, phraseFor, durText, clockText, summarise, countdownText, planLimits, planLimitKeys} from './limits.js';
+import {LEVELS, nameFor, phraseFor, durText, clockText, summarise, countdownText, labelMarkup, planLimits, planLimitKeys,
+    scheduleOf} from './limits.js';
 import {Auth, UsageError} from './auth.js';
 
 Gio._promisify(Soup.Session.prototype, 'send_and_read_async');
@@ -24,6 +25,8 @@ const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
 const OFF = 'claude-usage-off';
 const MAX_BACKOFF_SECONDS = 3600;
 const MENU_REFRESH_AFTER_MS = 60e3;
+// Session samples kept for the recent-rate projection
+const HISTORY_MS = 45 * 60e3;
 
 // Shown in place of the spark (grey, last numbers kept) when a fetch fails
 const PROBLEMS = {
@@ -35,6 +38,7 @@ const PROBLEMS = {
     auth: {icon: 'changes-prevent-symbolic', title: 'Sign in to Claude Code'},
     ratelimit: {icon: 'dialog-warning-symbolic', title: 'Slowed down by Anthropic'},
     server: {icon: 'dialog-warning-symbolic', title: 'Usage service problem'},
+    old: {icon: 'document-open-recent-symbolic', title: 'Numbers may be out of date'},
 };
 
 function bar(pct) {
@@ -53,6 +57,7 @@ class UsageIndicator extends PanelMenu.Button {
         this._cd = null;
         this._backoff = 1;
         this._lastTry = 0;
+        this._history = [];
 
         const icons = ext.dir.get_child('icons');
         this._claudeIcon = Gio.FileIcon.new(icons.get_child('claude-symbolic.svg'));
@@ -103,6 +108,11 @@ class UsageIndicator extends PanelMenu.Button {
         this._rows = new PopupMenu.PopupMenuSection();
         this.menu.addMenuItem(this._rows);
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+        // A leave day shouldn't count as a working day that went unused
+        this._dayOff = new PopupMenu.PopupSwitchMenuItem('Day off today', false);
+        this._dayOff.connect('toggled', (_i, on) =>
+            this._settings.set_string('day-off', on ? GLib.DateTime.new_now_local().format('%F') : ''));
+        this.menu.addMenuItem(this._dayOff);
         this._status = new PopupMenu.PopupMenuItem('', {reactive: false});
         this.menu.addMenuItem(this._status);
         this._signIn = this.menu.addAction('Sign in…', () => {
@@ -132,8 +142,13 @@ class UsageIndicator extends PanelMenu.Button {
 
         this._render();
         this._refresh();
+        // Re-judge every minute: pace moves with the clock, and a window may roll over between fetches
+        // (an open menu keeps its rows; only the countdown moves)
         this._tick = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 60, () => {
-            this._updateCountdown();
+            if (this.menu.isOpen)
+                this._updateCountdown();
+            else
+                this._render();
             return GLib.SOURCE_CONTINUE;
         });
     }
@@ -202,6 +217,9 @@ class UsageIndicator extends PanelMenu.Button {
         try {
             this._data = await this._fetch();
             this._fetchedAt = GLib.DateTime.new_now_local();
+            const used = planLimits(this._data).five_hour?.utilization;
+            if (typeof used === 'number')
+                this._history = [...this._history.filter(h => Date.now() - h.t < HISTORY_MS), {t: Date.now(), used}];
             this._backoff = 1;
             this._problem = null;
             // Plan-limit percentages and reset times only — lets the settings window list limits and draw its preview
@@ -230,8 +248,18 @@ class UsageIndicator extends PanelMenu.Button {
     _render() {
         const now = Date.now();
         // A 429 with numbers in hand isn't worth alarming about; everything else greys the bar
-        const problem = this._problem && !(this._problem.kind === 'ratelimit' && this._data) ? this._problem : null;
-        const summary = this._data ? summarise(this._data, this._settings, now) : null;
+        let problem = this._problem && !(this._problem.kind === 'ratelimit' && this._data) ? this._problem : null;
+        if (!problem && this._fetchedAt && now - this._fetchedAt.to_unix() * 1000 > 3 * this._interval() * 1000)
+            problem = {kind: 'old', message: `These numbers are from ${this._fetchedAt.format('%-I:%M %p')}.`};
+        const summary = this._data ? summarise(this._data, this._settings, now, this._history) : null;
+        // A window rolled over since the last fetch: fetch now rather than wait for the timer —
+        // once per fetched result, and never while Anthropic has asked us to back off
+        if (summary?.stale && this._staleTried !== this._fetchedAt && !this._busy &&
+            this._problem?.kind !== 'ratelimit') {
+            this._staleTried = this._fetchedAt;
+            this._refresh();
+        }
+        const schedule = scheduleOf(this._settings);
 
         this._rows.removeAll();
         for (const info of summary?.limits ?? []) {
@@ -247,10 +275,12 @@ class UsageIndicator extends PanelMenu.Button {
             line.add_child(new St.Label({text: `${info.pct}%`, style_class: 'claude-usage-pct'}));
             box.add_child(line);
             const parts = [];
+            if (info.stale)
+                parts.push('just reset · refreshing');
             if (info.resetMs !== null)
                 parts.push(`resets ${clockText(info.resetMs)}`, `in ${durText(info.resetMs - now)}`);
             if (info.pace !== null && !problem)
-                parts.push(`pace ≈ ${Math.round(info.pace)}%`);
+                parts.push(`pace ≈ ${Math.round(info.pace)}%${schedule && info.key !== 'five_hour' ? ' (work hours)' : ''}`);
             box.add_child(new St.Label({text: parts.join(' · '), style_class: 'claude-usage-reset'}));
             item.add_child(box);
             if (problem)
@@ -259,10 +289,14 @@ class UsageIndicator extends PanelMenu.Button {
         }
 
         this._icon.gicon = problem ? new Gio.ThemedIcon({name: PROBLEMS[problem.kind].icon}) : this._claudeIcon;
-        this._label.text = summary ? summary.text : (this._problem ? '--' : '…');
+        if (summary)
+            this._label.clutter_text.set_markup(labelMarkup(summary.parts, !problem && this._settings.get_boolean('color-enabled')));
+        else
+            this._label.text = this._problem ? '--' : '…';
         this._label.visible = !summary || summary.text !== '';
-        this._setLevel(problem || !summary ? null : summary.top?.level ?? 0);
         this._cd = problem ? null : summary?.cd ?? null;
+        this._setLevel(problem || !summary ? null : summary.top?.pillLevel ?? 0, this._cd?.level ?? 0);
+        this._dayOff.setToggleState(this._settings.get_string('day-off') === GLib.DateTime.new_now_local().format('%F'));
         this._updateCountdown();
 
         if (problem)
@@ -294,26 +328,19 @@ class UsageIndicator extends PanelMenu.Button {
 
     _renderVerdict(top) {
         const what = phraseFor(top.key);
-        const paced = this._settings.get_string('color-by') === 'pace' && top.pace !== null;
-        let title, text;
-        if (top.used >= 100) {
-            title = 'Limit reached';
-            text = top.resetMs !== null ? `The ${what} limit resets ${clockText(top.resetMs)}.` : '';
-        } else if (paced && top.level === 2) {
-            title = 'Running out';
-            text = `At this pace the ${what} limit runs out around ${clockText(top.outMs)}, ` +
-                `${durText(top.resetMs - top.outMs)} before it resets.`;
-        } else if (paced && top.level === 1) {
-            title = 'Cutting it close';
-            text = `At this pace you'll end the ${what} around ${Math.round(top.pace)}%.`;
-        } else if (paced) {
-            title = 'On track';
-            text = `You should reach the ${what} reset with room to spare.`;
-        } else {
-            title = ['Plenty left', 'Getting busy', 'Running low'][top.level];
-            text = `${top.pct}% of the ${what} limit used.`;
-        }
-        this._showVerdict(title, text, top.level);
+        const back = top.resetMs !== null ? ` It resets ${clockText(top.resetMs)}.` : '';
+        const [title, text] = {
+            blocked: ['Limit reached', `The ${what} limit is used up.${back}`],
+            almost: ['Almost used up', `${100 - top.pct}% of the ${what} limit left.${back}`],
+            out: ['Running out', `At ${top.recent ? 'your rate over the last half hour' : 'this pace'} the ${what} limit ` +
+                `runs out around ${clockText(top.outMs)}, ${durText(top.resetMs - top.outMs)} before it resets.`],
+            heading: ['Heading for the limit', `At this pace the ${what} limit runs out around ${clockText(top.outMs)}, ` +
+                `before it resets ${clockText(top.resetMs)}.`],
+            close: ['Cutting it close', `At this pace you'll end the ${what} around ${Math.round(top.pace)}%.`],
+            reset: ['Just reset', `The ${what} window rolled over. Fetching fresh numbers.`],
+            fine: ['On track', top.pace !== null ? `You should reach the ${what} reset with room to spare.` : 'Nothing is close to a limit.'],
+        }[top.reason];
+        this._showVerdict(title, text, top.pillLevel);
     }
 
     _updateCountdown() {
@@ -325,15 +352,16 @@ class UsageIndicator extends PanelMenu.Button {
         this._cdLabel.text = countdownText(this._cd, this._settings);
     }
 
-    // level: 0–2, or null for "not live" (grey)
-    _setLevel(level) {
+    // level: 0–2, or null for "not live" (grey); the countdown takes the level of the limit it counts down for
+    _setLevel(level, cdLevel) {
         const colour = this._settings.get_boolean('color-enabled');
         for (const actor of [this._icon, this._label, this._cdIcon, this._cdLabel]) {
             [...LEVELS, OFF].forEach(c => actor.remove_style_class_name(c));
+            const own = actor === this._cdIcon || actor === this._cdLabel ? cdLevel : level;
             if (level === null)
                 actor.add_style_class_name(OFF);
             else if (colour)
-                actor.add_style_class_name(LEVELS[level]);
+                actor.add_style_class_name(LEVELS[own]);
         }
     }
 

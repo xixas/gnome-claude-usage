@@ -4,6 +4,8 @@
 import GLib from 'gi://GLib';
 
 export const LEVELS = ['claude-usage-ok', 'claude-usage-warn', 'claude-usage-hot'];
+// Same colours as stylesheet.css, for Pango markup in the bar label and the GTK preview
+export const COLOURS = ['#8ff0a4', '#f6d32d', '#ff7b63'];
 
 const NAMES = {
     five_hour: 'Session',
@@ -39,8 +41,18 @@ export function phraseFor(key) {
     return `${nameFor(key)} weekly`;
 }
 
+const MIN = 60e3;
+const HOUR = 60 * MIN;
+const SESSION = 'five_hour';
+const DAY_NAMES = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+
 function windowMs(key) {
-    return key === 'five_hour' ? 5 * 3600e3 : 7 * 24 * 3600e3;
+    return key === SESSION ? 5 * HOUR : 7 * 24 * HOUR;
+}
+
+// Model-scoped weekly limits (Fable…) block only that model, and the API doesn't say which one is in use
+function isModel(key) {
+    return key !== SESSION && key !== 'seven_day';
 }
 
 // Only the plan limits: drops extra_usage, seven_day_oauth_apps and anything without a utilization
@@ -80,70 +92,183 @@ export function clockText(ms) {
     return when.format(sameDay ? '%-I:%M %p' : '%a %-I:%M %p');
 }
 
-// One limit: % used, reset time, projected % at reset (pace) and when it runs out at this pace.
-// Pace is left null in the first 10% of a window — too early to judge.
-function analyse(key, value, nowMs) {
-    const info = {key, used: value.utilization, pct: Math.round(value.utilization), resetMs: null, pace: null, outMs: null};
+// ---- Working hours: weekly pace counts only these, so nights, weekends and days off don't dilute it ----
+
+// {days: Set of 1–7 (ISO, Mon = 1), start, end (hours), dayOff: 'YYYY-MM-DD' | ''} or null for calendar time
+export function scheduleOf(settings) {
+    if (settings.get_string('pace-hours') !== 'work')
+        return null;
+    const days = new Set(settings.get_strv('work-days').map(d => DAY_NAMES.indexOf(d) + 1).filter(d => d > 0));
+    const start = settings.get_int('work-start'), end = settings.get_int('work-end');
+    if (!days.size || end <= start)
+        return null;
+    return {days, start, end, dayOff: settings.get_string('day-off')};
+}
+
+function midnight(ms) {
+    const t = GLib.DateTime.new_from_unix_local(Math.floor(ms / 1000));
+    return GLib.DateTime.new_local(t.get_year(), t.get_month(), t.get_day_of_month(), 0, 0, 0);
+}
+
+// Each working stretch [from, to) in ms that overlaps [fromMs, toMs), in order
+function* workSpans(fromMs, toMs, sched) {
+    for (let day = midnight(fromMs); day.to_unix() * 1000 < toMs; day = day.add_days(1)) {
+        if (!sched.days.has(day.get_day_of_week()) || day.format('%F') === sched.dayOff)
+            continue;
+        const s = Math.max(day.add_hours(sched.start).to_unix() * 1000, fromMs);
+        const e = Math.min(day.add_hours(sched.end).to_unix() * 1000, toMs);
+        if (e > s)
+            yield [s, e];
+    }
+}
+
+export function workMs(fromMs, toMs, sched) {
+    if (!sched)
+        return Math.max(0, toMs - fromMs);
+    let total = 0;
+    for (const [s, e] of workSpans(fromMs, toMs, sched))
+        total += e - s;
+    return total;
+}
+
+// The wall-clock moment `amount` of working time after fromMs, or null if that falls at or after limitMs
+function advance(fromMs, amount, limitMs, sched) {
+    if (!sched)
+        return fromMs + amount < limitMs ? fromMs + amount : null;
+    for (const [s, e] of workSpans(fromMs, limitMs, sched)) {
+        if (e - s > amount)
+            return s + amount;
+        amount -= e - s;
+    }
+    return null;
+}
+
+// ---- Per-limit verdict ----
+
+// %/ms over the last 30 minutes of session samples [{t, used}], ignoring anything before a reset (a drop)
+function recentRate(history, used, nowMs) {
+    let recent = (history ?? []).filter(s => nowMs - s.t <= 30 * MIN);
+    const drop = recent.findLastIndex((s, i) => i > 0 && s.used < recent[i - 1].used);
+    if (drop > 0)
+        recent = recent.slice(drop);
+    const first = recent[0];
+    if (!first || nowMs - first.t < 10 * MIN || used <= first.used)
+        return 0;
+    return (used - first.used) / (nowMs - first.t);
+}
+
+// One limit: % used, reset, projected % at reset (pace), when it runs out before the reset (outMs),
+// level (0 green · 1 amber · 2 red), pillLevel (what it may do to the whole indicator) and why (reason).
+function analyse(key, value, nowMs, opts) {
+    const used = value.utilization;
+    const info = {key, used, pct: Math.round(used), resetMs: null, pace: null, outMs: null,
+        level: 0, pillLevel: 0, reason: 'fine', stale: false, recent: false};
     const reset = value.resets_at ? GLib.DateTime.new_from_iso8601(value.resets_at, null) : null;
-    if (!reset)
+    if (reset)
+        info.resetMs = reset.to_unix() * 1000;
+
+    if (info.resetMs !== null && info.resetMs <= nowMs) {
+        // The window rolled over since the last fetch: it's empty now, whatever the old number said
+        Object.assign(info, {used: 0, pct: 0, stale: true, reason: 'reset', resetMs: null});
         return info;
-    info.resetMs = reset.to_unix() * 1000;
-    const window = windowMs(key);
-    const elapsed = window - (info.resetMs - nowMs);
-    if (elapsed < window * 0.1)
-        return info;
-    info.pace = info.used * window / elapsed;
-    if (info.used >= 100)
-        info.outMs = nowMs;
-    else if (info.pace >= 100)
-        info.outMs = nowMs + (100 - info.used) * elapsed / info.used;
+    }
+
+    if (info.resetMs !== null) {
+        const window = windowMs(key);
+        let sched = key === SESSION ? null : opts.schedule;
+        const start = info.resetMs - window;
+        let total = workMs(start, info.resetMs, sched);
+        if (sched && total <= 0) {
+            sched = null;
+            total = window;
+        }
+        // Floored at 10% of the window, so an early burst projects cautiously instead of not at all
+        const elapsed = Math.max(workMs(start, nowMs, sched), total * 0.1);
+        info.pace = used * total / elapsed;
+        if (used > 0 && used < 100)
+            info.outMs = advance(nowMs, (100 - used) * elapsed / used, info.resetMs, sched);
+        if (key === SESSION && used < 100) {
+            const rate = recentRate(opts.history, used, nowMs);
+            const out = rate > 0 ? nowMs + (100 - used) / rate : null;
+            if (out !== null && out < info.resetMs && (info.outMs === null || out < info.outMs))
+                Object.assign(info, {outMs: out, recent: true});
+        }
+    }
+
+    const left = info.resetMs === null ? Infinity : info.resetMs - nowMs;
+    if (used >= 100)
+        Object.assign(info, {level: 2, reason: 'blocked'});
+    else if (100 - used <= 2 && left > 30 * MIN)
+        Object.assign(info, {level: 2, reason: 'almost'});
+    else if (info.outMs !== null && (key === SESSION || info.outMs - nowMs <= 24 * HOUR || used >= 90))
+        Object.assign(info, {level: 2, reason: 'out'});
+    else if (info.outMs !== null)
+        Object.assign(info, {level: 1, reason: 'heading'});
+    else if (info.pace !== null && info.pace >= opts.amberAt)
+        Object.assign(info, {level: 1, reason: 'close'});
+    info.pillLevel = isModel(key) && !opts.modelRed ? Math.min(info.level, 1) : info.level;
     return info;
 }
 
-// 0 green, 1 amber, 2 red
-function levelOf(info, settings) {
-    if (settings.get_string('color-by') === 'pace' && info.pace !== null) {
-        if (info.outMs !== null)
-            return 2;
-        return info.pace >= 90 ? 1 : 0;
-    }
-    if (info.pct >= settings.get_int('hot-at'))
-        return 2;
-    return info.pct >= settings.get_int('warn-at') ? 1 : 0;
+// When a red limit stops you: now if it's used up, else when it runs out
+function blockAt(info, nowMs) {
+    return info.reason === 'out' ? info.outMs : nowMs;
 }
 
 // Everything the top bar needs from one API response + the current settings:
-// limits (all, for the menu), top (the limit that sets colour / countdown / verdict),
-// text (the bar label) and cd ({kind: 'reset' | 'out', ms} or null).
-export function summarise(data, settings, now = Date.now()) {
+// limits (all, session → week → models, for the menu), top (the limit that sets the colour and verdict),
+// parts ([{text, level}] for the bar label), text (plain label), cd ({kind: 'reset' | 'out', ms, level} or null,
+// coloured by the limit it counts down for)
+// and stale (a window rolled over since the fetch). history: recent session samples [{t, used}].
+export function summarise(data, settings, now = Date.now(), history = []) {
+    const opts = {
+        schedule: scheduleOf(settings),
+        amberAt: settings.get_int('amber-at'),
+        modelRed: settings.get_string('model-colour') === 'red',
+        history,
+    };
+    const rank = k => (k === SESSION ? 0 : k === 'seven_day' ? 1 : 2);
     const limits = Object.entries(planLimits(data))
-        .map(([k, v]) => {
-            const info = analyse(k, v, now);
-            info.level = levelOf(info, settings);
-            return info;
-        });
+        .map(([k, v]) => analyse(k, v, now, opts))
+        .sort((a, b) => rank(a.key) - rank(b.key));
 
-    // worst level first, then furthest along — by the same measure the colour uses
-    const paced = settings.get_string('color-by') === 'pace';
-    const score = i => i.level * 1000 + ((paced ? i.pace : null) ?? i.used);
-    const top = limits.reduce((a, b) => (score(b) > score(a) ? b : a), limits[0]) ?? null;
+    // Worst pill level wins; among equals the one that stops you first, then session → week → models
+    const top = limits.reduce((a, b) => {
+        if (b.pillLevel !== a.pillLevel)
+            return b.pillLevel > a.pillLevel ? b : a;
+        return a.level === 2 && b.level === 2 && blockAt(b, now) < blockAt(a, now) ? b : a;
+    }, limits[0]) ?? null;
 
-    const shown = limits.filter(i => settings.get_strv('bar-limits').includes(i.key));
-    const labels = settings.get_boolean('short-labels') || shown.length >= 3;
     const left = settings.get_string('number-mode') === 'left';
-    const text = shown
-        .map(i => `${labels ? `${shortFor(i.key)} ` : ''}${left ? 100 - i.pct : i.pct}%`)
-        .join(' · ');
+    const num = i => `${left ? 100 - i.pct : i.pct}%`;
+    const parts = limits
+        .filter(i => i.key === SESSION || i.level > 0)
+        .map(i => ({
+            text: `${i.key === SESSION ? '' : `${shortFor(i.key)} `}${num(i)}${i.stale ? ' ↻' : ''}`,
+            level: i.level,
+        }));
 
+    // Countdown: the red limit that stops you first, otherwise the session's reset
+    const reds = limits.filter(i => i.level === 2).sort((a, b) => blockAt(a, now) - blockAt(b, now));
+    const session = limits.find(i => i.key === SESSION);
     const mode = settings.get_string('countdown-mode');
     let cd = null;
-    if (top && (mode === 'always' || (mode === 'alert' && top.level > 0))) {
-        if (top.level === 2 && top.outMs !== null && top.used < 100)
-            cd = {kind: 'out', ms: top.outMs};
-        else if (top.resetMs !== null)
-            cd = {kind: 'reset', ms: top.resetMs};
+    if (mode !== 'never' && (mode === 'always' || (top?.pillLevel ?? 0) > 0)) {
+        const target = reds[0] ?? session;
+        if (target?.reason === 'out')
+            cd = {kind: 'out', ms: target.outMs, level: target.pillLevel};
+        else if (target?.resetMs != null)
+            cd = {kind: 'reset', ms: target.resetMs, level: target.pillLevel};
     }
-    return {limits, top, text, cd};
+    return {limits, top, parts, text: parts.map(p => p.text).join(' · '), cd, stale: limits.some(i => i.stale)};
+}
+
+// The bar label as Pango markup, each number in its own colour
+export function labelMarkup(parts, colour) {
+    return parts.map(p => {
+        const text = GLib.markup_escape_text(p.text, -1);
+        return colour ? `<span foreground="${COLOURS[p.level]}">${text}</span>` : text;
+    }).join(' · ');
 }
 
 export function countdownText(cd, settings) {
