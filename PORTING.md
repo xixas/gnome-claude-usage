@@ -58,13 +58,13 @@ session  : also from the rate over the last 30 min of fetched samples (≥ 10 mi
 reset passed (resets_at ≤ now) → the limit counts as 0%, "↻", and is refetched once
 ```
 
-**Level** per limit: red = used ≥ 100, or ≤ 2% left with the reset > 30 min away, or it runs out before the reset (weekly limits: only if that's within 24 h or used ≥ 90; otherwise amber); amber = pace ≥ `amber-at` (95); else green. Model-scoped limits (Fable…) colour the icon at most amber unless `model-colour` = red.
+**Level** per limit (weekly limits measure time in working hours): red = used ≥ 100, or ≤ 2% left with the reset > 30 min away, or it runs out before the reset within `soon` (1 h session, one working day weekly; ×1.25 if it was red last render) or with used ≥ 90 — otherwise amber; green "off" when no working time is left before a weekly reset (still shown in amber text at ≥ 90%); amber = pace ≥ `amber-at` (95); else green. Model-scoped limits (Fable…) colour the icon at most amber unless `model-colour` = red.
 
 **Top limit** = highest icon level; among reds, the one that stops you first; then session → week → models. It sets the icon colour and the verdict.
 
 **Bar text:** the session `9%` always, plus `W 64%` / `F 100%` for any other limit that's amber or red, each in its own colour (`100 − x` in "left" mode).
 
-**Countdown** (default: always): the red limit that stops you first, else the session. Runs out first → hourglass + time until run-out; otherwise alarm + time until its reset. Coloured by that limit. Format `1h50m` / `1d2h`, or clock time (`12:30 PM`, `Thu 1:30 PM`).
+**Countdown** (default: always): the limit that turns the icon red and stops you first, else the session. Runs out first → hourglass + time until run-out; otherwise alarm + time until its reset. Coloured by that limit. Format `1h50m` / `1d2h`, or clock time (`12:30 PM`, `Thu 1:30 PM`).
 
 **Verdict** (menu): Limit reached / Almost used up / Running out / Heading for the limit / Cutting it close / Just reset / On track.
 

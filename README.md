@@ -8,7 +8,7 @@ A small GNOME Shell extension that shows your Claude plan limits (session, week,
 ## What it shows
 
 - **Top bar:** Claude icon + the session % first, always. The week and model limits (`W 66%`, `F 100%`) join it only when they're amber or red, each in its own colour.
-- **Colour** answers "will this stop me before it resets?": green = fine, amber = you'll end the window at ≥ 95% or a weekly run-out is coming, red = used up, ≤ 2% left, or it runs out before the reset (weekly: only when that's within 24 h or ≥ 90% is used). A used-up model limit (Fable) turns the icon amber at most, since the API doesn't say which model you're on.
+- **Colour** answers "will this stop me before it resets?": green = fine, amber = you'll end the window at ≥ 95% or a weekly run-out is coming, red = used up, ≤ 2% left, or it runs out before the reset soon — within 1 h for the session, 1 working day for weekly limits — or at ≥ 90% used. Once red it stays red a little longer, so it doesn't flicker. A weekly limit with no working hours left before its reset is green (shown in amber text if ≥ 90%, in case you work the weekend). A used-up model limit (Fable) turns the icon amber at most, since the API doesn't say which model you're on.
 - **Countdown:** ⏰ the session reset, or the reset of the red limit that stops you first; ⌛ when a limit will run out first. Coloured by the limit it counts down for. Time left or clock time.
 - **Menu:** a one-line verdict naming the limit that sets the colour, every limit with a bar, reset time and pace, and a **Day off today** switch.
 - **Settings:** live preview, working days and hours for weekly pace, the amber threshold, how far a model limit may colour the icon, used/left, countdown, refresh interval.

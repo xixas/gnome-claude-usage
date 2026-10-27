@@ -96,7 +96,7 @@ test('6 Fable 100%, week 40% → Fable red, pill capped amber; red when model-co
     eq(byKey(s, 'seven_day_fable').level, 2, 'fable level');
     eq(s.top.pillLevel, 1, 'pill capped');
     eq(s.text, '12% · F 100%', 'label');
-    eq(s.cd.ms - NOW, 2 * DAY, 'countdown = fable reset');
+    eq(s.cd.ms - NOW, 3 * HOUR, 'countdown stays on the session (Fable is capped at amber)');
     eq(summarise(data, settings({'pace-hours': 'all', 'model-colour': 'red'}), NOW).top.pillLevel, 2, 'pill red');
 });
 
@@ -138,8 +138,18 @@ test('11 week 99% resets in 2 h → red (almost gone)', () => {
     eq(byKey(summarise({seven_day: lim(99, 2 * HOUR)}, settings(), NOW), 'seven_day').reason, 'almost', 'reason');
 });
 
-test('14 session 2 min in at 20% → red (floored elapsed)', () => {
-    eq(byKey(summarise({five_hour: lim(20, 5 * HOUR - 2 * MIN)}, settings(), NOW), 'five_hour').level, 2, 'level');
+test('14 session 2 min in at 20% → amber: run-out projected ~2 h away, not imminent', () => {
+    eq(byKey(summarise({five_hour: lim(20, 5 * HOUR - 2 * MIN)}, settings(), NOW), 'five_hour').reason, 'heading', 'reason');
+});
+
+test('screenshot 2:28 PM: session 20% after 58 min → 102% pace, out 8 min early but ~4 h away → amber', () => {
+    const i = byKey(summarise({five_hour: lim(20, 4 * HOUR + 2 * MIN)}, settings(), NOW), 'five_hour');
+    eq(Math.round(i.pace), 103, 'pace');
+    eq(i.reason, 'heading', 'reason');
+});
+
+test('same steady 102% pace in the last hour → red', () => {
+    eq(byKey(summarise({five_hour: lim(85, 50 * MIN)}, settings(), NOW), 'five_hour').level, 2, 'level');
 });
 
 test('15 session 2 min in at 1% → green', () => {
@@ -187,10 +197,10 @@ test('live alert case: pill amber from the week, session timer stays green', () 
     eq(s.cd.level, 0, 'countdown colour = session');
 });
 
-test('used-up Fable: countdown red would break the amber cap → countdown takes the capped level', () => {
+test('used-up Fable: countdown stays the green session timer', () => {
     const s = summarise({five_hour: lim(12, 3 * HOUR), seven_day: lim(40, 2 * DAY), seven_day_fable: lim(100, 2 * DAY)},
         settings({'pace-hours': 'all'}), NOW);
-    eq(s.cd.level, 1, 'countdown level');
+    eq(s.cd.level, 0, 'countdown level');
 });
 
 test('planLimits reads model limits from the nested list', () => {
@@ -207,6 +217,41 @@ test('run-out skips the weekend and a day off', () => {
     const when = o => GLib.DateTime.new_from_unix_local(Math.floor(byKey(summarise(data, settings(o), sat), 'seven_day').outMs / 1000)).format('%a %H:%M');
     eq(when({}), 'Wed 12:15', 'normal week');
     eq(when({'day-off': '2026-11-02'}), 'Thu 12:15', 'Monday off');
+});
+
+// Week window Thu 22 Oct 13:30 → Mon 2 Nov 09:00 is not real; use a window that resets Monday 09:00
+const FRI_EVE = GLib.DateTime.new_local(2026, 10, 30, 18, 0, 0).to_unix() * 1000;
+const MON_9 = GLib.DateTime.new_local(2026, 11, 2, 9, 0, 0).to_unix() * 1000;
+
+test('week 99% at Fri 18:00, resets Mon 09:00 → not red over the weekend (no working time left)', () => {
+    const sat = FRI_EVE + 18 * HOUR;
+    const i = byKey(summarise({seven_day: {utilization: 99, resets_at: iso(MON_9)}}, settings(), sat), 'seven_day');
+    eq(i.level, 0, 'level');
+    eq(i.reason, 'off', 'reason');
+    const s = summarise({five_hour: lim(0, null, sat), seven_day: {utilization: 99, resets_at: iso(MON_9)}}, settings(), sat);
+    eq(s.text, '0% · W 99%', 'still visible in the bar');
+    eq(s.parts[1].level, 1, 'amber text');
+    eq(s.top.pillLevel, 0, 'icon green');
+});
+
+test('session hovering at the 1 h boundary stays red once red (no flapping)', () => {
+    // 75% after 3 h 40 m, steady: out in ~73 min — just over an hour
+    const data = {five_hour: lim(75, 80 * MIN)};
+    eq(byKey(summarise(data, settings(), NOW), 'five_hour').level, 1, 'fresh: amber');
+    eq(byKey(summarise(data, settings(), NOW, [], new Set(['five_hour'])), 'five_hour').level, 2, 'was red: stays red');
+});
+
+test('used-up Fable with amber cap does not take the countdown from the session', () => {
+    const s = summarise({five_hour: lim(12, 3 * HOUR), seven_day: lim(40, 2 * DAY), seven_day_fable: lim(100, 3 * DAY)},
+        settings({'pace-hours': 'all'}), NOW);
+    eq(s.cd.ms - NOW, 3 * HOUR, 'countdown = session reset');
+});
+
+test('week 85% by Fri 18:00 (Thu reset): on Sunday the run-out is ~2.5 working hours into Monday → red', () => {
+    const thuReset = GLib.DateTime.new_local(2026, 11, 5, 13, 30, 0).to_unix() * 1000;
+    const sun = FRI_EVE + 42 * HOUR;
+    const i = byKey(summarise({seven_day: {utilization: 85, resets_at: iso(thuReset)}}, settings(), sun), 'seven_day');
+    eq(i.level, 2, 'level');
 });
 
 print(failed ? `\n${failed} failed` : '\nall passed');

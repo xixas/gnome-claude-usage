@@ -195,12 +195,20 @@ function analyse(key, value, nowMs, opts) {
         }
     }
 
-    const left = info.resetMs === null ? Infinity : info.resetMs - nowMs;
+    // Weekly limits measure time in working hours: with none left before the reset there's nothing to act on
+    const sched = key === SESSION ? null : opts.schedule;
+    const left = info.resetMs === null ? Infinity : workMs(nowMs, info.resetMs, sched);
+    // "Close" = within an hour for the session, a working day for weekly limits; a quarter more once red, so it doesn't flap
+    const soon = (key === SESSION ? HOUR : sched ? (sched.end - sched.start) * HOUR : 24 * HOUR) *
+        (opts.wasRed?.has(key) ? 1.25 : 1);
     if (used >= 100)
         Object.assign(info, {level: 2, reason: 'blocked'});
+    else if (left === 0)
+        Object.assign(info, {reason: 'off'});
     else if (100 - used <= 2 && left > 30 * MIN)
         Object.assign(info, {level: 2, reason: 'almost'});
-    else if (info.outMs !== null && (key === SESSION || info.outMs - nowMs <= 24 * HOUR || used >= 90))
+    // Red only when the run-out is close (or nearly everything is used): a slight overshoot hours away is amber
+    else if (info.outMs !== null && (workMs(nowMs, info.outMs, sched) <= soon || used >= 90))
         Object.assign(info, {level: 2, reason: 'out'});
     else if (info.outMs !== null)
         Object.assign(info, {level: 1, reason: 'heading'});
@@ -219,13 +227,15 @@ function blockAt(info, nowMs) {
 // limits (all, session → week → models, for the menu), top (the limit that sets the colour and verdict),
 // parts ([{text, level}] for the bar label), text (plain label), cd ({kind: 'reset' | 'out', ms, level} or null,
 // coloured by the limit it counts down for)
-// and stale (a window rolled over since the fetch). history: recent session samples [{t, used}].
-export function summarise(data, settings, now = Date.now(), history = []) {
+// and stale (a window rolled over since the fetch). history: recent session samples [{t, used}];
+// wasRed: keys that were red last time (they stay red a little longer, so the colour doesn't flap).
+export function summarise(data, settings, now = Date.now(), history = [], wasRed = new Set()) {
     const opts = {
         schedule: scheduleOf(settings),
         amberAt: settings.get_int('amber-at'),
         modelRed: settings.get_string('model-colour') === 'red',
         history,
+        wasRed,
     };
     const rank = k => (k === SESSION ? 0 : k === 'seven_day' ? 1 : 2);
     const limits = Object.entries(planLimits(data))
@@ -241,15 +251,18 @@ export function summarise(data, settings, now = Date.now(), history = []) {
 
     const left = settings.get_string('number-mode') === 'left';
     const num = i => `${left ? 100 - i.pct : i.pct}%`;
+    // A nearly used-up weekly limit with no working time left stays visible (amber text, icon green):
+    // you can't act on it at work, but weekend use would hit it
+    const offWatch = i => i.reason === 'off' && i.used >= 90;
     const parts = limits
-        .filter(i => i.key === SESSION || i.level > 0)
+        .filter(i => i.key === SESSION || i.level > 0 || offWatch(i))
         .map(i => ({
             text: `${i.key === SESSION ? '' : `${shortFor(i.key)} `}${num(i)}${i.stale ? ' ↻' : ''}`,
-            level: i.level,
+            level: offWatch(i) ? 1 : i.level,
         }));
 
     // Countdown: the red limit that stops you first, otherwise the session's reset
-    const reds = limits.filter(i => i.level === 2).sort((a, b) => blockAt(a, now) - blockAt(b, now));
+    const reds = limits.filter(i => i.pillLevel === 2).sort((a, b) => blockAt(a, now) - blockAt(b, now));
     const session = limits.find(i => i.key === SESSION);
     const mode = settings.get_string('countdown-mode');
     let cd = null;

@@ -58,6 +58,7 @@ class UsageIndicator extends PanelMenu.Button {
         this._backoff = 1;
         this._lastTry = 0;
         this._history = [];
+        this._wasRed = new Set();
 
         const icons = ext.dir.get_child('icons');
         this._claudeIcon = Gio.FileIcon.new(icons.get_child('claude-symbolic.svg'));
@@ -251,7 +252,8 @@ class UsageIndicator extends PanelMenu.Button {
         let problem = this._problem && !(this._problem.kind === 'ratelimit' && this._data) ? this._problem : null;
         if (!problem && this._fetchedAt && now - this._fetchedAt.to_unix() * 1000 > 3 * this._interval() * 1000)
             problem = {kind: 'old', message: `These numbers are from ${this._fetchedAt.format('%-I:%M %p')}.`};
-        const summary = this._data ? summarise(this._data, this._settings, now, this._history) : null;
+        const summary = this._data ? summarise(this._data, this._settings, now, this._history, this._wasRed) : null;
+        this._wasRed = new Set(summary?.limits.filter(i => i.level === 2).map(i => i.key));
         // A window rolled over since the last fetch: fetch now rather than wait for the timer —
         // once per fetched result, and never while Anthropic has asked us to back off
         if (summary?.stale && this._staleTried !== this._fetchedAt && !this._busy &&
@@ -338,6 +340,8 @@ class UsageIndicator extends PanelMenu.Button {
                 `before it resets ${clockText(top.resetMs)}.`],
             close: ['Cutting it close', `At this pace you'll end the ${what} around ${Math.round(top.pace)}%.`],
             reset: ['Just reset', `The ${what} window rolled over. Fetching fresh numbers.`],
+            off: ['Nothing to do', `${top.pct}% of the ${what} limit used, and no working hours left before it resets ` +
+                `${clockText(top.resetMs)}.`],
             fine: ['On track', top.pace !== null ? `You should reach the ${what} reset with room to spare.` : 'Nothing is close to a limit.'],
         }[top.reason];
         this._showVerdict(title, text, top.pillLevel);
