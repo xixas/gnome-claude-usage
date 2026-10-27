@@ -379,7 +379,8 @@ class UsageIndicator extends PanelMenu.Button {
             const own = actor === this._cdIcon || actor === this._cdLabel ? cdLevel : level;
             if (level === null)
                 actor.add_style_class_name(OFF);
-            else if (colour)
+            // The label colours each number itself (labelMarkup); a class colour would override that
+            else if (colour && actor !== this._label)
                 actor.add_style_class_name(LEVELS[own]);
         }
     }

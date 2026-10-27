@@ -307,6 +307,16 @@ test('label markup escapes text', () => {
     eq(labelMarkup([{text: 'a<b&', level: 0}], false), 'a&lt;b&amp;', 'escaped');
 });
 
+test('each number keeps its own colour: green session beside an amber week (Tue 4:55 PM screenshot)', () => {
+    const now = GLib.DateTime.new_local(2026, 10, 27, 16, 55, 0).to_unix() * 1000;
+    const thuReset = GLib.DateTime.new_local(2026, 10, 29, 13, 30, 0).to_unix() * 1000;
+    const data = {five_hour: lim(62, 95 * MIN, now), seven_day: {utilization: 72, resets_at: iso(thuReset)}};
+    const s = summarise(data, settings(), now);
+    eq(s.text, '62% · W 72%', 'label');
+    eq(s.top.pillLevel, 1, 'icon amber');
+    eq(labelMarkup(s.parts, true), '<span foreground="#8ff0a4">62%</span> · <span foreground="#f6d32d">W 72%</span>', 'markup');
+});
+
 test('projected run-out passed since the fetch → "lapsed", red, refetch, countdown not in the past', () => {
     // 95% fetched at NOW, 10 min later the projected run-out (~7 min after the fetch) has passed
     const data = {five_hour: lim(95, 2 * HOUR)};
