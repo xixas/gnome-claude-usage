@@ -292,7 +292,7 @@ class UsageIndicator extends PanelMenu.Button {
             this._label.text = this._problem ? '--' : '…';
         this._label.visible = !summary || summary.text !== '';
         this._cd = problem ? null : summary?.cd ?? null;
-        this._setLevel(problem || !summary ? null : summary.top?.pillLevel ?? 0, this._cd?.level ?? 0);
+        this._setLevel(problem || !summary ? null : summary.top?.pillLevel ?? 0, this._cd?.level ?? 0, summary?.parts[0]?.level ?? 0);
         this._updateCountdown();
 
         if (problem)
@@ -372,15 +372,19 @@ class UsageIndicator extends PanelMenu.Button {
     }
 
     // level: 0–2, or null for "not live" (grey); the countdown takes the level of the limit it counts down for
-    _setLevel(level, cdLevel) {
+    // and the label the level of its first number
+    _setLevel(level, cdLevel, labelLevel) {
         const colour = this._settings.get_boolean('color-enabled');
         for (const actor of [this._icon, this._label, this._cdIcon, this._cdLabel]) {
             [...LEVELS, OFF].forEach(c => actor.remove_style_class_name(c));
-            const own = actor === this._cdIcon || actor === this._cdLabel ? cdLevel : level;
+            let own = actor === this._cdIcon || actor === this._cdLabel ? cdLevel : level;
+            // Spans colour the other numbers (labelMarkup), but Clutter ignores the colour of a span
+            // starting at the first character, so the first number takes the label's class colour
+            if (actor === this._label)
+                own = labelLevel;
             if (level === null)
                 actor.add_style_class_name(OFF);
-            // The label colours each number itself (labelMarkup); a class colour would override that
-            else if (colour && actor !== this._label)
+            else if (colour)
                 actor.add_style_class_name(LEVELS[own]);
         }
     }
