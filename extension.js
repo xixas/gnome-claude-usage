@@ -8,6 +8,7 @@ import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
 import St from 'gi://St';
 import Clutter from 'gi://Clutter';
+import Pango from 'gi://Pango';
 import Soup from 'gi://Soup?version=3.0';
 
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
@@ -74,6 +75,8 @@ class UsageIndicator extends PanelMenu.Button {
             y_align: Clutter.ActorAlign.CENTER,
             style_class: 'claude-usage-label',
         });
+        // Without this the crowded top bar may shrink the label and ellipsize the last number to "…"
+        this._label.clutter_text.ellipsize = Pango.EllipsizeMode.NONE;
         // Countdown: ⏰ time to reset, or ⌛ time until you run out
         this._cdIcon = new St.Icon({style_class: 'claude-usage-cd-icon', visible: false});
         this._cdLabel = new St.Label({
